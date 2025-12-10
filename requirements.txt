@@ -1,0 +1,39 @@
+# AudioCleaner - Core Dependencies
+# Python 3.10+ required
+
+# ===== PyTorch =====
+torch>=2.0.0
+torchaudio>=2.0.0
+
+# ===== Audio Processing =====
+soundfile>=0.12.0
+librosa>=0.10.0
+scipy>=1.10.0
+numpy>=1.24.0
+
+# ===== Denoiser Dependencies =====
+julius>=0.2.6
+pystoi>=0.4.0
+
+# ===== Resemble Enhance (SE/Noise Removal) =====
+# Install from GitHub for latest version:
+# pip install git+https://github.com/resemble-ai/resemble-enhance.git
+resemble-enhance
+
+# ===== GUI (Gradio) =====
+gradio>=5.0.0
+
+# ===== Utilities =====
+tqdm>=4.65.0
+matplotlib>=3.7.0
+omegaconf>=2.3.0
+
+# ===== Optional: VoiceFixer =====
+# Install separately in ~/voicefixer_app/
+# See: https://github.com/haoheliu/voicefixer
+
+# ===== Optional: Demucs (BGM Removal) =====
+# Install in separate venv (requires Python 3.10):
+# python3.10 -m venv ~/demucs_venv310
+# source ~/demucs_venv310/bin/activate
+# pip install demucs

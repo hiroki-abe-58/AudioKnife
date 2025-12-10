@@ -1,0 +1,176 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ===== Virtual Environment =====
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# ===== AI/ML Models (Large Files) =====
+# PyTorch Models
+*.pt
+*.pth
+*.ckpt
+*.th
+*.bin
+*.safetensors
+
+# Model directories
+denoiser/pretrained/
+pretrained_models/
+models/
+*.model
+
+# Hugging Face cache
+.cache/huggingface/
+
+# ===== Audio Files =====
+# Don't track audio files (can be large)
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+*.aac
+*.wma
+*.aiff
+*.aif
+
+# Exception: keep example files
+!example/*.wav
+!example/*.mp3
+
+# ===== Temporary Files =====
+*.tmp
+*.temp
+/tmp/
+temp/
+demucs_temp/
+
+# ===== Logs =====
+*.log
+logs/
+install_log.txt
+install_pro_log.txt
+
+# ===== macOS =====
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# ===== Windows =====
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ===== Linux =====
+*~
+
+# ===== IDE / Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+.project
+.pydevproject
+.settings/
+
+# ===== Cache =====
+.cache/
+*.cache
+.mypy_cache/
+.ruff_cache/
+
+# ===== Testing =====
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# ===== Environment Variables =====
+.env
+.env.local
+.env.*.local
+
+# ===== Gradio =====
+flagged/
+gradio_cached_examples/
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+*.ipynb
+
+# ===== Notes (internal development notes) =====
+notes/
+
+# ===== Security / Credentials =====
+# API keys, tokens, credentials
+*.key
+*.pem
+*_rsa
+*_rsa.pub
+*.crt
+*.cer
+credentials.json
+secrets.yaml
+secrets.yml
+api_keys.txt
+.secrets/
+
+# SSH keys
+id_rsa*
+id_ed25519*
+
+# Local configuration with potential sensitive data
+local_config.py
+local_settings.py
+config.local.*
+
+# ===== Git Upload Script =====
+# Prevent accidental commit of upload logs
+upload_*.log
+
