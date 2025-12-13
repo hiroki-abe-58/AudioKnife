@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Resemble Enhance - Audio Denoising and Enhancement Script
-SE・ノイズ・拍手などを分離し、クリアな音声を抽出
+MP-SENet - High Quality Speech Enhancement Script
+高品質音声強調: magnitude/phaseを並列処理してノイズを除去
 
-Resemble Enhanceを使用して:
-1. Denoiser: 背景ノイズ、環境音、SEなどを除去
-2. Enhancer: 音質を向上（オプション）
+MP-SENetは音声強調（Speech Enhancement）に特化したモデルで、
+magnitude と phase スペクトルを並列で推定・処理することで、
+従来手法より高品質なノイズ除去を実現します。
+
+PESQ スコア: 3.50 (VoiceBank+DEMAND dataset)
 """
 
 import os
@@ -21,17 +23,42 @@ def setup_device():
     import torch
     
     if torch.cuda.is_available():
-        device = torch.device("cuda")
+        device = "cuda"
         print("[情報] CUDA GPU使用")
     elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
         # MPSは一部の操作で問題が発生する可能性があるため、CPUを推奨
-        device = torch.device("cpu")
+        device = "cpu"
         print("[情報] CPU使用 (MPS利用可能だが安定性のためCPU使用)")
     else:
-        device = torch.device("cpu")
+        device = "cpu"
         print("[情報] CPU使用")
     
     return device
+
+
+def setup_mp_senet(device="cpu"):
+    """MP-SENetモデルのセットアップ"""
+    try:
+        from MPSENet import MPSENet
+    except ImportError as e:
+        print(f"[エラー] MPSENetが見つかりません: {e}")
+        print("インストール方法:")
+        print("  pip install MPSENet")
+        sys.exit(1)
+    
+    try:
+        print("[情報] MP-SENetモデル読み込み中...")
+        # 事前学習済みモデルをHugging Face Hubからロード
+        model = MPSENet.from_pretrained("JacobLinCool/MP-SENet-DNS").to(device)
+        model.eval()
+        print("[情報] モデル読み込み完了")
+        return model
+    except Exception as e:
+        print(f"[エラー] モデル読み込み失敗: {e}")
+        print("初回実行時はモデルのダウンロードに時間がかかります")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 def load_audio(input_path):
@@ -46,8 +73,8 @@ def load_audio(input_path):
     return waveform, sr
 
 
-def resample_audio(waveform, sr, target_sr=44100):
-    """サンプリングレートを変換"""
+def resample_audio(waveform, sr, target_sr=16000):
+    """サンプリングレートを変換（MP-SENetは16kHz推奨）"""
     import torchaudio
     
     if sr != target_sr:
@@ -58,28 +85,24 @@ def resample_audio(waveform, sr, target_sr=44100):
     return waveform, target_sr
 
 
-def process_with_resemble_enhance(waveform, sr, device, mode="denoise", nfe=32, solver="midpoint", lambd=0.5, tau=0.5):
+def process_with_mp_senet(waveform, sr, model, device="cpu"):
     """
-    Resemble Enhanceで音声を処理
+    MP-SENetで音声を処理
     
     Args:
         waveform: 入力波形 (torch.Tensor)
         sr: サンプリングレート
+        model: MP-SENetモデル
         device: 処理デバイス
-        mode: "denoise" (ノイズ除去のみ) or "enhance" (ノイズ除去+音質向上)
-        nfe: Number of function evaluations (Enhancer用、デフォルト32)
-        solver: ソルバー ("midpoint", "rk4", "euler")
-        lambd: Enhancer強度パラメータ (0.0-1.0)
-        tau: Enhancer時間パラメータ (0.0-1.0)
     
     Returns:
         処理後の波形とサンプリングレート
     """
     import torch
-    from resemble_enhance.enhancer.inference import denoise, enhance
     
-    # Resemble Enhanceは44.1kHzで動作
-    target_sr = 44100
+    # MP-SENetは16kHzで動作
+    target_sr = 16000
+    original_sr = sr
     waveform, sr = resample_audio(waveform, sr, target_sr)
     
     # モノラルに変換（ステレオの場合は各チャンネルを処理）
@@ -94,27 +117,19 @@ def process_with_resemble_enhance(waveform, sr, device, mode="denoise", nfe=32, 
             print(f"  - チャンネル {ch+1} 処理中...")
         
         # チャンネルデータを取得
-        ch_wav = waveform[ch].to(device)
+        ch_wav = waveform[ch].unsqueeze(0).to(device)  # (1, time)
         
-        # Step 1: Denoising
-        print(f"[処理中] ノイズ除去中{'...' if not is_stereo else ''}")
-        denoised_wav, new_sr = denoise(ch_wav, sr, device)
+        print(f"[処理中] MP-SENet音声強調中{'...' if not is_stereo else ''}")
         
-        if mode == "enhance":
-            # Step 2: Enhancement (オプション)
-            print(f"[処理中] 音質向上中 (nfe={nfe}, solver={solver})...")
-            enhanced_wav, new_sr = enhance(
-                denoised_wav, 
-                new_sr, 
-                device, 
-                nfe=nfe,
-                solver=solver,
-                lambd=lambd,
-                tau=tau
-            )
-            processed_channels.append(enhanced_wav.cpu())
-        else:
-            processed_channels.append(denoised_wav.cpu())
+        with torch.no_grad():
+            # MP-SENetで処理
+            enhanced_wav = model(ch_wav)
+        
+        # 結果を取得
+        if isinstance(enhanced_wav, tuple):
+            enhanced_wav = enhanced_wav[0]
+        
+        processed_channels.append(enhanced_wav.squeeze().cpu())
     
     # チャンネルを結合
     if is_stereo:
@@ -122,7 +137,7 @@ def process_with_resemble_enhance(waveform, sr, device, mode="denoise", nfe=32, 
     else:
         output_wav = processed_channels[0].unsqueeze(0)
     
-    return output_wav, new_sr
+    return output_wav, target_sr
 
 
 def save_audio(waveform, sr, output_path):
@@ -140,35 +155,26 @@ def save_audio(waveform, sr, output_path):
     print(f"[情報] 出力: {sr}Hz, {waveform.shape[0]}ch")
 
 
-def process_audio(input_path, output_path, mode="denoise", nfe=32, solver="midpoint", lambd=0.5, tau=0.5):
+def process_audio(input_path, output_path):
     """
     メイン処理関数
     
     Args:
         input_path: 入力ファイルパス
         output_path: 出力ファイルパス
-        mode: "denoise" or "enhance"
-        nfe: Number of function evaluations (Enhancer用)
-        solver: ソルバー
-        lambd: Enhancer強度
-        tau: Enhancer時間パラメータ
     """
     try:
         # デバイスセットアップ
         device = setup_device()
         
+        # モデルセットアップ
+        model = setup_mp_senet(device)
+        
         # 音声読み込み
         waveform, sr = load_audio(input_path)
         
-        # Resemble Enhanceで処理
-        output_wav, output_sr = process_with_resemble_enhance(
-            waveform, sr, device, 
-            mode=mode,
-            nfe=nfe,
-            solver=solver,
-            lambd=lambd,
-            tau=tau
-        )
+        # MP-SENetで処理
+        output_wav, output_sr = process_with_mp_senet(waveform, sr, model, device)
         
         # 保存
         save_audio(output_wav, output_sr, output_path)
@@ -185,44 +191,39 @@ def process_audio(input_path, output_path, mode="denoise", nfe=32, solver="midpo
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Resemble Enhance - SE・ノイズ除去ツール",
+        description="MP-SENet - 高品質音声強調ツール",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用例:
-  ノイズ除去のみ（高速、推奨）:
-    python run_resemble_enhance.py input.wav -m denoise
+  基本的な使い方:
+    python run_mp_senet.py input.wav
     
-  ノイズ除去 + 音質向上（高品質だが遅い）:
-    python run_resemble_enhance.py input.wav -m enhance
-    
-  音質向上のパラメータ調整:
-    python run_resemble_enhance.py input.wav -m enhance --nfe 64 --lambd 0.7
+  出力ファイル指定:
+    python run_mp_senet.py input.wav -o output.wav
+
+特徴:
+  - magnitude/phase を並列処理
+  - PESQ スコア 3.50 達成
+  - ノイズの多い音声のクリーンアップに最適
 """
     )
     parser.add_argument("input", nargs="?", help="入力音声ファイル")
     parser.add_argument("-o", "--output", help="出力ファイル名")
-    parser.add_argument("-m", "--mode", choices=["denoise", "enhance"], default="denoise",
-                       help="処理モード: denoise=ノイズ除去のみ, enhance=ノイズ除去+音質向上 (デフォルト: denoise)")
-    parser.add_argument("--nfe", type=int, default=32,
-                       help="Enhancerのステップ数 (デフォルト: 32、高い値=高品質だが遅い)")
-    parser.add_argument("--solver", choices=["midpoint", "rk4", "euler"], default="midpoint",
-                       help="Enhancerのソルバー (デフォルト: midpoint)")
-    parser.add_argument("--lambd", type=float, default=0.5,
-                       help="Enhancer強度 0.0-1.0 (デフォルト: 0.5)")
-    parser.add_argument("--tau", type=float, default=0.5,
-                       help="Enhancer時間パラメータ 0.0-1.0 (デフォルト: 0.5)")
     
     args = parser.parse_args()
     
     # 対話モード
     if not args.input:
-        print("===== Resemble Enhance - SE・ノイズ除去ツール =====")
+        print("===== MP-SENet - 高品質音声強調ツール =====")
         print("")
-        print("このツールは音声から以下を除去します:")
-        print("  - 背景ノイズ（ホワイトノイズ、環境音）")
-        print("  - SE（効果音）")
-        print("  - 拍手・歓声")
-        print("  - その他の非音声成分")
+        print("このツールは高品質なノイズ除去を行います:")
+        print("  - 背景ノイズ")
+        print("  - 環境音")
+        print("  - ホワイトノイズ")
+        print("")
+        print("特徴:")
+        print("  - magnitude/phase 並列処理")
+        print("  - PESQ スコア 3.50")
         print("")
         print("使い方:")
         print("  1. 音声ファイルをこのウィンドウにドラッグ&ドロップ")
@@ -244,32 +245,17 @@ def main():
     if args.output:
         output_path = Path(args.output)
     else:
-        suffix = "_denoised" if args.mode == "denoise" else "_enhanced"
-        output_path = input_path.parent / f"{input_path.stem}{suffix}.wav"
+        output_path = input_path.parent / f"{input_path.stem}_mp_senet.wav"
     
     print(f"入力: {input_path}")
     print(f"出力: {output_path}")
-    print(f"モード: {'ノイズ除去のみ' if args.mode == 'denoise' else 'ノイズ除去+音質向上'}")
-    if args.mode == "enhance":
-        print(f"  - NFE: {args.nfe}")
-        print(f"  - Solver: {args.solver}")
-        print(f"  - Lambda: {args.lambd}")
-        print(f"  - Tau: {args.tau}")
     print("")
     
-    success = process_audio(
-        str(input_path), 
-        str(output_path),
-        mode=args.mode,
-        nfe=args.nfe,
-        solver=args.solver,
-        lambd=args.lambd,
-        tau=args.tau
-    )
+    success = process_audio(str(input_path), str(output_path))
     
     if success:
         print(f"\n結果ファイル: {output_path}")
-        print("おつかれさん!")
+        print("完了!")
     else:
         print("\n処理失敗")
         sys.exit(1)
@@ -286,8 +272,3 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
-
-
-
-

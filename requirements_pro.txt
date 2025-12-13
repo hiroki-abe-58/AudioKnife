@@ -28,6 +28,14 @@ hyperpyyaml>=1.2.0
 huggingface_hub>=0.20.0
 joblib>=1.3.0
 
+# ===== MP-SENet (High Quality Speech Enhancement) =====
+# PESQ score 3.50, magnitude/phase parallel processing
+MPSENet>=0.2.5
+
+# ===== MossFormer2 (Speaker Separation) =====
+# Transformer + RNN-Free for enhanced speech separation
+modelscope>=1.9.0
+
 # ===== GUI (Gradio) =====
 gradio>=5.0.0
 

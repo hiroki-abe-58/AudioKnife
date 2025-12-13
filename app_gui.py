@@ -122,6 +122,26 @@ PROCESSING_MODES = {
         "best_for": "最も詳細な楽器分離",
         "speed": "Medium",
         "pipeline": "Spleeter (5stems)"
+    },
+    "mp_senet": {
+        "display_name": "MP-SENet (High Quality)",
+        "models": [
+            {"name": "MP-SENet", "role": "Speech Enhancement", "source": "INTERSPEECH 2023"}
+        ],
+        "description": "高品質音声強調: magnitude/phaseを並列処理してノイズ除去",
+        "best_for": "ノイズの多い録音の高品質クリーンアップ",
+        "speed": "Fast",
+        "pipeline": "MP-SENet"
+    },
+    "mossformer2": {
+        "display_name": "MossFormer2 (Speaker Separation)",
+        "models": [
+            {"name": "MossFormer2", "role": "Speech Separation", "source": "Alibaba DAMO"}
+        ],
+        "description": "話者分離: 複数音声が混在した音源から特定話者を抽出",
+        "best_for": "ノイズに混じった音声の抽出、複数話者分離",
+        "speed": "Medium",
+        "pipeline": "MossFormer2"
     }
 }
 
@@ -136,7 +156,9 @@ MODE_NAME_MAP = {
     "Resemble Enhance (Denoise + Quality)": "resemble_enhance",
     "Spleeter (Vocal Extract)": "spleeter_2stems",
     "Spleeter (4stems)": "spleeter_4stems",
-    "Spleeter (5stems)": "spleeter_5stems"
+    "Spleeter (5stems)": "spleeter_5stems",
+    "MP-SENet (High Quality)": "mp_senet",
+    "MossFormer2 (Speaker Separation)": "mossformer2"
 }
 
 def get_mode_info_html(mode_name):
@@ -416,6 +438,76 @@ def run_spleeter(input_file, output_file, stems="2stems", extract_stem="vocals")
                 pass
 
 
+def run_mp_senet(input_file, output_file):
+    """
+    Run MP-SENet for high-quality speech enhancement
+    
+    Args:
+        input_file: Input audio file path
+        output_file: Output audio file path
+    
+    Returns:
+        tuple: (output_file_path, status_message)
+    """
+    venv_python = SCRIPT_DIR / "venv" / "bin" / "python"
+    mp_senet_script = SCRIPT_DIR / "scripts" / "run_mp_senet.py"
+    
+    if not venv_python.exists():
+        return None, "Python venv not found"
+    
+    if not mp_senet_script.exists():
+        return None, "MP-SENet script not found"
+    
+    cmd = [str(venv_python), str(mp_senet_script), str(input_file), "-o", str(output_file)]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(SCRIPT_DIR))
+        if result.returncode == 0:
+            return output_file, "MP-SENet: OK"
+        else:
+            return None, f"MP-SENet failed: {result.stderr[-300:]}"
+    except Exception as e:
+        return None, f"MP-SENet error: {str(e)}"
+
+
+def run_mossformer2(input_file, output_file, speaker_index=0):
+    """
+    Run MossFormer2 for speaker separation
+    
+    Args:
+        input_file: Input audio file path
+        output_file: Output audio file path
+        speaker_index: Index of speaker to extract (0-based)
+    
+    Returns:
+        tuple: (output_file_path, status_message)
+    """
+    venv_python = SCRIPT_DIR / "venv" / "bin" / "python"
+    mossformer2_script = SCRIPT_DIR / "scripts" / "run_mossformer2.py"
+    
+    if not venv_python.exists():
+        return None, "Python venv not found"
+    
+    if not mossformer2_script.exists():
+        return None, "MossFormer2 script not found"
+    
+    cmd = [
+        str(venv_python), str(mossformer2_script), 
+        str(input_file), 
+        "-o", str(output_file),
+        "-s", str(speaker_index)
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(SCRIPT_DIR))
+        if result.returncode == 0:
+            return output_file, f"MossFormer2: OK - Speaker {speaker_index + 1} extracted"
+        else:
+            return None, f"MossFormer2 failed: {result.stderr[-300:]}"
+    except Exception as e:
+        return None, f"MossFormer2 error: {str(e)}"
+
+
 # ===== Main Processing Function =====
 
 def process_audio(audio_file, mode, progress=gr.Progress()):
@@ -534,6 +626,16 @@ def process_audio(audio_file, mode, progress=gr.Progress()):
                 result, msg = run_spleeter(input_path, output_path, "5stems", "vocals")
                 status_messages.append(msg)
             
+            elif mode == "MP-SENet (High Quality)":
+                progress(0.3, desc="Running MP-SENet...")
+                result, msg = run_mp_senet(input_path, output_path)
+                status_messages.append(msg)
+            
+            elif mode == "MossFormer2 (Speaker Separation)":
+                progress(0.3, desc="Running MossFormer2...")
+                result, msg = run_mossformer2(input_path, output_path)
+                status_messages.append(msg)
+            
             else:
                 return None, f"Unknown mode: {mode}"
             
@@ -563,6 +665,8 @@ def get_features_status_html():
     demucs_available = DEMUCS_VENV is not None
     resemble_available = (SCRIPT_DIR / "scripts" / "run_resemble_enhance.py").exists()
     spleeter_available = SPLEETER_VENV is not None
+    mp_senet_available = (SCRIPT_DIR / "scripts" / "run_mp_senet.py").exists()
+    mossformer2_available = (SCRIPT_DIR / "scripts" / "run_mossformer2.py").exists()
     
     features = [
         ("Facebook Denoiser", denoiser_available, "Meta AI Research"),
@@ -570,6 +674,8 @@ def get_features_status_html():
         ("Demucs", demucs_available, "Meta AI Research"),
         ("Resemble Enhance", resemble_available, "Resemble AI"),
         ("Spleeter", spleeter_available, "Deezer Research"),
+        ("MP-SENet", mp_senet_available, "INTERSPEECH 2023"),
+        ("MossFormer2", mossformer2_available, "Alibaba DAMO"),
     ]
     
     html = '<div style="display: flex; flex-wrap: wrap; gap: 8px;">'
@@ -673,7 +779,9 @@ def create_interface():
                         "Resemble Enhance (Denoise + Quality)",
                         "Spleeter (Vocal Extract)",
                         "Spleeter (4stems)",
-                        "Spleeter (5stems)"
+                        "Spleeter (5stems)",
+                        "MP-SENet (High Quality)",
+                        "MossFormer2 (Speaker Separation)"
                     ],
                     value="Resemble Denoise (SE/Noise removal)",
                     label="",
@@ -801,6 +909,30 @@ def create_interface():
                             </td>
                             <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 Spleeter (Vocal), Spleeter (4stems), Spleeter (5stems)
+                            </td>
+                        </tr>
+                        <tr style="background: #fafafa;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                <strong>MP-SENet</strong>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">INTERSPEECH 2023</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                High-quality speech enhancement (magnitude/phase parallel processing, PESQ 3.50)
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                MP-SENet (High Quality)
+                            </td>
+                        </tr>
+                        <tr style="background: #ffffff;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                <strong>MossFormer2</strong>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Alibaba DAMO</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                Speaker separation (Transformer + RNN-Free recurrent network)
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                MossFormer2 (Speaker Separation)
                             </td>
                         </tr>
                     </tbody>
