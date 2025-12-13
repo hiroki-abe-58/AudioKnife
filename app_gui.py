@@ -92,6 +92,36 @@ PROCESSING_MODES = {
         "best_for": "最高品質の音声強化",
         "speed": "Medium",
         "pipeline": "Resemble Denoiser → Enhancer"
+    },
+    "spleeter_2stems": {
+        "display_name": "Spleeter (Vocal)",
+        "models": [
+            {"name": "Spleeter 2stems", "role": "Vocal/Accompaniment Separation", "source": "Deezer Research"}
+        ],
+        "description": "音源分離AI: ボーカルと伴奏を分離し、ボーカルのみを抽出",
+        "best_for": "カラオケ音源からのボーカル抽出、BGM除去",
+        "speed": "Fast",
+        "pipeline": "Spleeter (2stems)"
+    },
+    "spleeter_4stems": {
+        "display_name": "Spleeter (4stems)",
+        "models": [
+            {"name": "Spleeter 4stems", "role": "Multi-track Separation", "source": "Deezer Research"}
+        ],
+        "description": "4トラック分離: ボーカル/ドラム/ベース/その他に分離",
+        "best_for": "楽器ごとの分離が必要な場合",
+        "speed": "Medium",
+        "pipeline": "Spleeter (4stems)"
+    },
+    "spleeter_5stems": {
+        "display_name": "Spleeter (5stems)",
+        "models": [
+            {"name": "Spleeter 5stems", "role": "Full Separation", "source": "Deezer Research"}
+        ],
+        "description": "5トラック分離: ボーカル/ドラム/ベース/ピアノ/その他に分離",
+        "best_for": "最も詳細な楽器分離",
+        "speed": "Medium",
+        "pipeline": "Spleeter (5stems)"
     }
 }
 
@@ -103,7 +133,10 @@ MODE_NAME_MAP = {
     "BGM Removal (Demucs)": "bgm_removal",
     "Denoiser Only": "denoiser_only",
     "Resemble Denoise (SE/Noise removal)": "resemble_denoise",
-    "Resemble Enhance (Denoise + Quality)": "resemble_enhance"
+    "Resemble Enhance (Denoise + Quality)": "resemble_enhance",
+    "Spleeter (Vocal Extract)": "spleeter_2stems",
+    "Spleeter (4stems)": "spleeter_4stems",
+    "Spleeter (5stems)": "spleeter_5stems"
 }
 
 def get_mode_info_html(mode_name):
@@ -174,6 +207,13 @@ DEMUCS_VENV_PATHS = [
     Path.home() / ".demucs",
 ]
 
+# Spleeter venv paths to check
+SPLEETER_VENV_PATHS = [
+    Path.home() / "spleeter_env",
+    Path.home() / "spleeter_venv",
+    Path.home() / ".spleeter",
+]
+
 def find_demucs_venv():
     """Find Demucs virtual environment"""
     for path in DEMUCS_VENV_PATHS:
@@ -181,7 +221,15 @@ def find_demucs_venv():
             return path
     return None
 
+def find_spleeter_venv():
+    """Find Spleeter virtual environment"""
+    for path in SPLEETER_VENV_PATHS:
+        if (path / "bin" / "python").exists():
+            return path
+    return None
+
 DEMUCS_VENV = find_demucs_venv()
+SPLEETER_VENV = find_spleeter_venv()
 
 
 # ===== Processing Functions =====
@@ -304,6 +352,70 @@ def run_resemble_enhance(input_file, output_file, mode="denoise"):
         return None, f"Resemble Enhance error: {str(e)}"
 
 
+def run_spleeter(input_file, output_file, stems="2stems", extract_stem="vocals"):
+    """
+    Run Spleeter for source separation
+    
+    Args:
+        input_file: Input audio file path
+        output_file: Output audio file path
+        stems: Model type - "2stems", "4stems", or "5stems"
+        extract_stem: Which stem to extract - "vocals", "drums", "bass", "piano", "other"
+    
+    Returns:
+        tuple: (output_file_path, status_message)
+    """
+    if not SPLEETER_VENV:
+        return None, "Spleeter not found. Please install Spleeter first."
+    
+    spleeter_python = SPLEETER_VENV / "bin" / "python"
+    spleeter_cmd = SPLEETER_VENV / "bin" / "spleeter"
+    
+    if not spleeter_python.exists():
+        return None, f"Spleeter Python not found at {spleeter_python}"
+    
+    temp_output_dir = Path(output_file).parent / "spleeter_temp"
+    temp_output_dir.mkdir(exist_ok=True)
+    
+    # Build spleeter command
+    cmd = [
+        str(spleeter_cmd), "separate",
+        "-p", f"spleeter:{stems}",
+        "-o", str(temp_output_dir),
+        str(input_file)
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            input_name = Path(input_file).stem
+            stem_path = temp_output_dir / input_name / f"{extract_stem}.wav"
+            
+            if stem_path.exists():
+                shutil.copy(stem_path, output_file)
+                shutil.rmtree(temp_output_dir)
+                return output_file, f"Spleeter ({stems}): OK - Extracted {extract_stem}"
+            else:
+                # Try to find what was created
+                created_dir = temp_output_dir / input_name
+                if created_dir.exists():
+                    available_stems = list(created_dir.glob("*.wav"))
+                    stems_info = ", ".join([s.stem for s in available_stems])
+                    return None, f"Spleeter: {extract_stem} not found. Available: {stems_info}"
+                return None, f"Spleeter: Output not found at {stem_path}"
+        else:
+            return None, f"Spleeter failed: {result.stderr[-300:]}"
+    except Exception as e:
+        return None, f"Spleeter error: {str(e)}"
+    finally:
+        if temp_output_dir.exists():
+            try:
+                shutil.rmtree(temp_output_dir)
+            except:
+                pass
+
+
 # ===== Main Processing Function =====
 
 def process_audio(audio_file, mode, progress=gr.Progress()):
@@ -407,6 +519,21 @@ def process_audio(audio_file, mode, progress=gr.Progress()):
                 result, msg = run_resemble_enhance(input_path, output_path, "enhance")
                 status_messages.append(msg)
             
+            elif mode == "Spleeter (Vocal Extract)":
+                progress(0.3, desc="Running Spleeter (2stems)...")
+                result, msg = run_spleeter(input_path, output_path, "2stems", "vocals")
+                status_messages.append(msg)
+            
+            elif mode == "Spleeter (4stems)":
+                progress(0.3, desc="Running Spleeter (4stems)...")
+                result, msg = run_spleeter(input_path, output_path, "4stems", "vocals")
+                status_messages.append(msg)
+            
+            elif mode == "Spleeter (5stems)":
+                progress(0.3, desc="Running Spleeter (5stems)...")
+                result, msg = run_spleeter(input_path, output_path, "5stems", "vocals")
+                status_messages.append(msg)
+            
             else:
                 return None, f"Unknown mode: {mode}"
             
@@ -435,12 +562,14 @@ def get_features_status_html():
     voicefixer_available = (VOICEFIXER_DIR / "venv" / "bin" / "python").exists()
     demucs_available = DEMUCS_VENV is not None
     resemble_available = (SCRIPT_DIR / "scripts" / "run_resemble_enhance.py").exists()
+    spleeter_available = SPLEETER_VENV is not None
     
     features = [
         ("Facebook Denoiser", denoiser_available, "Meta AI Research"),
         ("VoiceFixer", voicefixer_available, "haoheliu"),
         ("Demucs", demucs_available, "Meta AI Research"),
         ("Resemble Enhance", resemble_available, "Resemble AI"),
+        ("Spleeter", spleeter_available, "Deezer Research"),
     ]
     
     html = '<div style="display: flex; flex-wrap: wrap; gap: 8px;">'
@@ -541,7 +670,10 @@ def create_interface():
                         "BGM Removal (Demucs)",
                         "Denoiser Only",
                         "Resemble Denoise (SE/Noise removal)",
-                        "Resemble Enhance (Denoise + Quality)"
+                        "Resemble Enhance (Denoise + Quality)",
+                        "Spleeter (Vocal Extract)",
+                        "Spleeter (4stems)",
+                        "Spleeter (5stems)"
                     ],
                     value="Resemble Denoise (SE/Noise removal)",
                     label="",
@@ -659,6 +791,18 @@ def create_interface():
                                 Resemble Denoise, Resemble Enhance
                             </td>
                         </tr>
+                        <tr style="background: #ffffff;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                <strong>Spleeter</strong>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Deezer Research</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                Fast music source separation (2/4/5 stems)
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                Spleeter (Vocal), Spleeter (4stems), Spleeter (5stems)
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>
@@ -698,6 +842,7 @@ if __name__ == "__main__":
     print("=" * 50)
     print(f"Script directory: {SCRIPT_DIR}")
     print(f"Demucs venv: {DEMUCS_VENV}")
+    print(f"Spleeter venv: {SPLEETER_VENV}")
     print(f"VoiceFixer: {VOICEFIXER_DIR}")
     print(f"ClearSound: {CLEARSOUND_DIR}")
     print("=" * 50)
