@@ -107,11 +107,11 @@ MODE_NAME_MAP = {
 }
 
 def get_mode_info_html(mode_name):
-    """Generate HTML for mode information display"""
+    """Generate HTML for mode information display (Light theme)"""
     mode_key = MODE_NAME_MAP.get(mode_name, "resemble_denoise")
     mode = PROCESSING_MODES[mode_key]
     
-    # Speed indicator
+    # Speed indicator colors
     speed_colors = {"Fast": "#4CAF50", "Medium": "#FF9800", "Slow": "#f44336"}
     speed_color = speed_colors.get(mode["speed"], "#9E9E9E")
     
@@ -121,26 +121,26 @@ def get_mode_info_html(mode_name):
         models_html += f"""
         <div style="display: inline-flex; align-items: center; margin: 4px 0;">
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                        color: white; padding: 8px 12px; border-radius: 8px; 
+                        color: #ffffff; padding: 8px 12px; border-radius: 8px; 
                         font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
-                <div style="font-weight: 600;">{model["name"]}</div>
-                <div style="font-size: 11px; opacity: 0.9;">{model["role"]}</div>
-                <div style="font-size: 10px; opacity: 0.7;">by {model["source"]}</div>
+                <div style="font-weight: 600; color: #ffffff;">{model["name"]}</div>
+                <div style="font-size: 11px; color: rgba(255,255,255,0.9);">{model["role"]}</div>
+                <div style="font-size: 10px; color: rgba(255,255,255,0.8);">by {model["source"]}</div>
             </div>
-            <span style="font-size: 20px; margin: 0 8px; color: #666;">{arrow}</span>
+            <span style="font-size: 20px; margin: 0 8px; color: #666666;">{arrow}</span>
         </div>
         """
     
     html = f"""
-    <div style="background: #f8f9fa; border-radius: 12px; padding: 16px; margin-top: 8px; 
+    <div style="background: #f5f5f5; border-radius: 12px; padding: 16px; margin-top: 8px; 
                 border: 1px solid #e0e0e0; font-family: system-ui, -apple-system, sans-serif;">
         
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h4 style="margin: 0; color: #1a1a2e; font-size: 16px;">
+            <h4 style="margin: 0; color: #333333; font-size: 16px; font-weight: 600;">
                 Processing Pipeline
             </h4>
-            <span style="background: {speed_color}; color: white; padding: 4px 12px; 
-                         border-radius: 12px; font-size: 12px; font-weight: 500;">
+            <span style="background: {speed_color}; color: #ffffff; padding: 4px 12px; 
+                         border-radius: 12px; font-size: 12px; font-weight: 600;">
                 {mode["speed"]}
             </span>
         </div>
@@ -149,14 +149,14 @@ def get_mode_info_html(mode_name):
             {models_html}
         </div>
         
-        <div style="background: white; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
-            <div style="color: #666; font-size: 12px; margin-bottom: 4px;">Description</div>
-            <div style="color: #333; font-size: 14px;">{mode["description"]}</div>
+        <div style="background: #ffffff; border-radius: 8px; padding: 12px; margin-bottom: 8px; border: 1px solid #e0e0e0;">
+            <div style="color: #666666; font-size: 12px; margin-bottom: 4px; font-weight: 500;">Description</div>
+            <div style="color: #333333; font-size: 14px;">{mode["description"]}</div>
         </div>
         
-        <div style="background: white; border-radius: 8px; padding: 12px;">
-            <div style="color: #666; font-size: 12px; margin-bottom: 4px;">Best For</div>
-            <div style="color: #333; font-size: 14px;">{mode["best_for"]}</div>
+        <div style="background: #ffffff; border-radius: 8px; padding: 12px; border: 1px solid #e0e0e0;">
+            <div style="color: #666666; font-size: 12px; margin-bottom: 4px; font-weight: 500;">Best For</div>
+            <div style="color: #333333; font-size: 14px;">{mode["best_for"]}</div>
         </div>
     </div>
     """
@@ -428,7 +428,7 @@ def process_audio(audio_file, mode, progress=gr.Progress()):
 # ===== Gradio Interface =====
 
 def get_features_status_html():
-    """Generate HTML for features availability status"""
+    """Generate HTML for features availability status (Light theme)"""
     features = []
     
     denoiser_available = (CLEARSOUND_DIR / "venv" / "bin" / "python").exists()
@@ -446,21 +446,23 @@ def get_features_status_html():
     html = '<div style="display: flex; flex-wrap: wrap; gap: 8px;">'
     for name, available, source in features:
         if available:
-            color = "#4CAF50"
+            bg_color = "#e8f5e9"
+            border_color = "#4CAF50"
+            icon_color = "#2e7d32"
             icon = "check_circle"
-            status = "Available"
         else:
-            color = "#9E9E9E"
+            bg_color = "#f5f5f5"
+            border_color = "#bdbdbd"
+            icon_color = "#757575"
             icon = "cancel"
-            status = "Not Installed"
         
         html += f"""
-        <div style="display: flex; align-items: center; background: {color}15; 
-                    border: 1px solid {color}40; border-radius: 8px; padding: 6px 10px;">
-            <span class="material-icons" style="font-size: 16px; color: {color}; margin-right: 6px;">{icon}</span>
+        <div style="display: flex; align-items: center; background: {bg_color}; 
+                    border: 1px solid {border_color}; border-radius: 8px; padding: 6px 10px;">
+            <span class="material-icons" style="font-size: 16px; color: {icon_color}; margin-right: 6px;">{icon}</span>
             <div>
-                <div style="font-size: 12px; font-weight: 500; color: #333;">{name}</div>
-                <div style="font-size: 10px; color: #666;">{source}</div>
+                <div style="font-size: 12px; font-weight: 600; color: #333333;">{name}</div>
+                <div style="font-size: 10px; color: #666666;">{source}</div>
             </div>
         </div>
         """
@@ -472,13 +474,13 @@ def create_interface():
     """Create Gradio interface"""
     
     with gr.Blocks(title="AudioKnife") as demo:
-        # Header with embedded CSS
+        # Header with embedded CSS (Light theme)
         gr.HTML("""
         <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
         <style>
             .main-header {
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
+                color: #ffffff;
                 padding: 24px;
                 border-radius: 16px;
                 margin-bottom: 20px;
@@ -488,10 +490,11 @@ def create_interface():
                 margin: 0;
                 font-size: 28px;
                 font-weight: 700;
+                color: #ffffff;
             }
             .main-header p {
                 margin: 8px 0 0 0;
-                opacity: 0.9;
+                color: rgba(255, 255, 255, 0.9);
                 font-size: 14px;
             }
             .section-title {
@@ -500,7 +503,7 @@ def create_interface():
                 gap: 8px;
                 margin-bottom: 12px;
                 font-weight: 600;
-                color: #333;
+                color: #333333;
             }
         </style>
         <div class="main-header">
@@ -515,7 +518,7 @@ def create_interface():
                 gr.HTML("""
                 <div class="section-title">
                     <span class="material-icons" style="color: #667eea;">upload_file</span>
-                    <span>Input</span>
+                    <span style="color: #333333;">Input</span>
                 </div>
                 """)
                 audio_input = gr.Audio(
@@ -527,7 +530,7 @@ def create_interface():
                 gr.HTML("""
                 <div class="section-title" style="margin-top: 20px;">
                     <span class="material-icons" style="color: #667eea;">tune</span>
-                    <span>Processing Mode</span>
+                    <span style="color: #333333;">Processing Mode</span>
                 </div>
                 """)
                 mode_select = gr.Radio(
@@ -562,7 +565,7 @@ def create_interface():
                 gr.HTML("""
                 <div class="section-title" style="margin-top: 20px;">
                     <span class="material-icons" style="color: #667eea;">hub</span>
-                    <span>Available AI Models</span>
+                    <span style="color: #333333;">Available AI Models</span>
                 </div>
                 """)
                 gr.HTML(get_features_status_html())
@@ -572,7 +575,7 @@ def create_interface():
                 gr.HTML("""
                 <div class="section-title">
                     <span class="material-icons" style="color: #667eea;">audio_file</span>
-                    <span>Output</span>
+                    <span style="color: #333333;">Output</span>
                 </div>
                 """)
                 audio_output = gr.Audio(
@@ -583,7 +586,7 @@ def create_interface():
                 gr.HTML("""
                 <div class="section-title" style="margin-top: 20px;">
                     <span class="material-icons" style="color: #667eea;">terminal</span>
-                    <span>Processing Log</span>
+                    <span style="color: #333333;">Processing Log</span>
                 </div>
                 """)
                 status_output = gr.Textbox(
@@ -597,62 +600,62 @@ def create_interface():
         # Model Reference Section
         with gr.Accordion("AI Models Reference", open=False):
             gr.HTML("""
-            <div style="padding: 16px;">
-                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <div style="padding: 16px; background: #ffffff; border-radius: 8px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 14px; background: #ffffff;">
                     <thead>
                         <tr style="background: #f5f5f5;">
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Model</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Source</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Function</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Used In Modes</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Model</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Source</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Function</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Used In Modes</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <tr>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                        <tr style="background: #ffffff;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
                                 <strong>Facebook Denoiser</strong>
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">Meta AI Research</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Meta AI Research</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 Real-time speech enhancement in waveform domain
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 Standard, High Noise, Severely Degraded, Denoiser Only
                             </td>
                         </tr>
-                        <tr>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                        <tr style="background: #fafafa;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
                                 <strong>VoiceFixer</strong>
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">haoheliu (GitHub)</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">haoheliu (GitHub)</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 Audio restoration and quality enhancement
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 Standard, High Noise, Severely Degraded
                             </td>
                         </tr>
-                        <tr>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                        <tr style="background: #ffffff;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
                                 <strong>Demucs (htdemucs)</strong>
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">Meta AI Research</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Meta AI Research</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 Hybrid Transformer for music source separation
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 BGM Removal
                             </td>
                         </tr>
-                        <tr>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                        <tr style="background: #fafafa;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
                                 <strong>Resemble Enhance</strong>
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">Resemble AI</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Resemble AI</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 SE/noise separation + neural audio enhancement
                             </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
                                 Resemble Denoise, Resemble Enhance
                             </td>
                         </tr>
