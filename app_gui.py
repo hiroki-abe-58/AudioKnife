@@ -16,6 +16,152 @@ warnings.filterwarnings('ignore')
 
 import gradio as gr
 
+# ===== Mode Definitions =====
+# Each mode contains: display_name, models_used, description, best_for, speed
+PROCESSING_MODES = {
+    "standard": {
+        "display_name": "Standard",
+        "models": [
+            {"name": "Facebook Denoiser", "role": "Noise Reduction", "source": "Meta AI Research"},
+            {"name": "VoiceFixer", "role": "Audio Enhancement", "source": "haoheliu"}
+        ],
+        "description": "2段階処理: まずノイズを除去し、次に音質を向上させます",
+        "best_for": "一般的な音声クリーンアップ",
+        "speed": "Medium",
+        "pipeline": "Denoiser → VoiceFixer (Mode 0)"
+    },
+    "high_noise": {
+        "display_name": "High Noise",
+        "models": [
+            {"name": "Facebook Denoiser", "role": "Noise Reduction", "source": "Meta AI Research"},
+            {"name": "VoiceFixer", "role": "Aggressive Enhancement", "source": "haoheliu"}
+        ],
+        "description": "強力なノイズ除去モード: VoiceFixerのアグレッシブ設定を使用",
+        "best_for": "背景ノイズが大きい録音",
+        "speed": "Medium",
+        "pipeline": "Denoiser → VoiceFixer (Mode 1)"
+    },
+    "severely_degraded": {
+        "display_name": "Severely Degraded",
+        "models": [
+            {"name": "Facebook Denoiser", "role": "Noise Reduction", "source": "Meta AI Research"},
+            {"name": "VoiceFixer", "role": "Maximum Restoration", "source": "haoheliu"}
+        ],
+        "description": "最大復元モード: 極度に劣化した音声の修復を試みます",
+        "best_for": "品質が非常に低い録音",
+        "speed": "Medium",
+        "pipeline": "Denoiser → VoiceFixer (Mode 2)"
+    },
+    "bgm_removal": {
+        "display_name": "BGM Removal",
+        "models": [
+            {"name": "Demucs (htdemucs)", "role": "Source Separation", "source": "Meta AI Research"}
+        ],
+        "description": "音楽分離AI: 音声とBGMを分離し、ボーカルのみを抽出",
+        "best_for": "BGM除去、ポッドキャスト、動画の音声抽出",
+        "speed": "Slow",
+        "pipeline": "Demucs (Hybrid Transformer)"
+    },
+    "denoiser_only": {
+        "display_name": "Denoiser Only",
+        "models": [
+            {"name": "Facebook Denoiser", "role": "Noise Reduction", "source": "Meta AI Research"}
+        ],
+        "description": "シンプルなノイズ除去のみ: 高速で軽量な処理",
+        "best_for": "簡単なクリーンアップ、バッチ処理",
+        "speed": "Fast",
+        "pipeline": "Denoiser Only"
+    },
+    "resemble_denoise": {
+        "display_name": "Resemble Denoise",
+        "models": [
+            {"name": "Resemble Enhance (Denoiser)", "role": "SE/Noise Separation", "source": "Resemble AI"}
+        ],
+        "description": "効果音・環境音の分離: 拍手、SE、背景音を除去",
+        "best_for": "効果音、拍手、環境ノイズの除去",
+        "speed": "Fast",
+        "pipeline": "Resemble Denoiser"
+    },
+    "resemble_enhance": {
+        "display_name": "Resemble Enhance",
+        "models": [
+            {"name": "Resemble Enhance (Denoiser)", "role": "Noise Removal", "source": "Resemble AI"},
+            {"name": "Resemble Enhance (Enhancer)", "role": "Quality Boost", "source": "Resemble AI"}
+        ],
+        "description": "高品質処理: ノイズ除去 + ニューラルネットワークによる音質向上",
+        "best_for": "最高品質の音声強化",
+        "speed": "Medium",
+        "pipeline": "Resemble Denoiser → Enhancer"
+    }
+}
+
+# Map display names to internal keys
+MODE_NAME_MAP = {
+    "Standard (Denoiser + VoiceFixer)": "standard",
+    "High Noise (Aggressive)": "high_noise",
+    "Severely Degraded": "severely_degraded",
+    "BGM Removal (Demucs)": "bgm_removal",
+    "Denoiser Only": "denoiser_only",
+    "Resemble Denoise (SE/Noise removal)": "resemble_denoise",
+    "Resemble Enhance (Denoise + Quality)": "resemble_enhance"
+}
+
+def get_mode_info_html(mode_name):
+    """Generate HTML for mode information display"""
+    mode_key = MODE_NAME_MAP.get(mode_name, "resemble_denoise")
+    mode = PROCESSING_MODES[mode_key]
+    
+    # Speed indicator
+    speed_colors = {"Fast": "#4CAF50", "Medium": "#FF9800", "Slow": "#f44336"}
+    speed_color = speed_colors.get(mode["speed"], "#9E9E9E")
+    
+    models_html = ""
+    for i, model in enumerate(mode["models"]):
+        arrow = " → " if i < len(mode["models"]) - 1 else ""
+        models_html += f"""
+        <div style="display: inline-flex; align-items: center; margin: 4px 0;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                        color: white; padding: 8px 12px; border-radius: 8px; 
+                        font-size: 13px; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">
+                <div style="font-weight: 600;">{model["name"]}</div>
+                <div style="font-size: 11px; opacity: 0.9;">{model["role"]}</div>
+                <div style="font-size: 10px; opacity: 0.7;">by {model["source"]}</div>
+            </div>
+            <span style="font-size: 20px; margin: 0 8px; color: #666;">{arrow}</span>
+        </div>
+        """
+    
+    html = f"""
+    <div style="background: #f8f9fa; border-radius: 12px; padding: 16px; margin-top: 8px; 
+                border: 1px solid #e0e0e0; font-family: system-ui, -apple-system, sans-serif;">
+        
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h4 style="margin: 0; color: #1a1a2e; font-size: 16px;">
+                Processing Pipeline
+            </h4>
+            <span style="background: {speed_color}; color: white; padding: 4px 12px; 
+                         border-radius: 12px; font-size: 12px; font-weight: 500;">
+                {mode["speed"]}
+            </span>
+        </div>
+        
+        <div style="display: flex; flex-wrap: wrap; align-items: center; margin-bottom: 16px;">
+            {models_html}
+        </div>
+        
+        <div style="background: white; border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 4px;">Description</div>
+            <div style="color: #333; font-size: 14px;">{mode["description"]}</div>
+        </div>
+        
+        <div style="background: white; border-radius: 8px; padding: 12px;">
+            <div style="color: #666; font-size: 12px; margin-bottom: 4px;">Best For</div>
+            <div style="color: #333; font-size: 14px;">{mode["best_for"]}</div>
+        </div>
+    </div>
+    """
+    return html
+
 # ===== Configuration =====
 SCRIPT_DIR = Path(__file__).parent.resolve()
 VOICEFIXER_DIR = Path.home() / "voicefixer_app"
@@ -281,56 +427,109 @@ def process_audio(audio_file, mode, progress=gr.Progress()):
 
 # ===== Gradio Interface =====
 
+def get_features_status_html():
+    """Generate HTML for features availability status"""
+    features = []
+    
+    denoiser_available = (CLEARSOUND_DIR / "venv" / "bin" / "python").exists()
+    voicefixer_available = (VOICEFIXER_DIR / "venv" / "bin" / "python").exists()
+    demucs_available = DEMUCS_VENV is not None
+    resemble_available = (SCRIPT_DIR / "scripts" / "run_resemble_enhance.py").exists()
+    
+    features = [
+        ("Facebook Denoiser", denoiser_available, "Meta AI Research"),
+        ("VoiceFixer", voicefixer_available, "haoheliu"),
+        ("Demucs", demucs_available, "Meta AI Research"),
+        ("Resemble Enhance", resemble_available, "Resemble AI"),
+    ]
+    
+    html = '<div style="display: flex; flex-wrap: wrap; gap: 8px;">'
+    for name, available, source in features:
+        if available:
+            color = "#4CAF50"
+            icon = "check_circle"
+            status = "Available"
+        else:
+            color = "#9E9E9E"
+            icon = "cancel"
+            status = "Not Installed"
+        
+        html += f"""
+        <div style="display: flex; align-items: center; background: {color}15; 
+                    border: 1px solid {color}40; border-radius: 8px; padding: 6px 10px;">
+            <span class="material-icons" style="font-size: 16px; color: {color}; margin-right: 6px;">{icon}</span>
+            <div>
+                <div style="font-size: 12px; font-weight: 500; color: #333;">{name}</div>
+                <div style="font-size: 10px; color: #666;">{source}</div>
+            </div>
+        </div>
+        """
+    html += '</div>'
+    return html
+
+
 def create_interface():
     """Create Gradio interface"""
     
-    # Check available features
-    features_status = []
-    
-    if (CLEARSOUND_DIR / "venv" / "bin" / "python").exists():
-        features_status.append("- Denoiser: Available")
-    else:
-        features_status.append("- Denoiser: Not installed")
-    
-    if (VOICEFIXER_DIR / "venv" / "bin" / "python").exists():
-        features_status.append("- VoiceFixer: Available")
-    else:
-        features_status.append("- VoiceFixer: Not installed")
-    
-    if DEMUCS_VENV:
-        features_status.append(f"- Demucs: Available ({DEMUCS_VENV})")
-    else:
-        features_status.append("- Demucs: Not installed")
-    
-    if (SCRIPT_DIR / "scripts" / "run_resemble_enhance.py").exists():
-        features_status.append("- Resemble Enhance: Available")
-    else:
-        features_status.append("- Resemble Enhance: Not installed")
-    
-    features_text = "\n".join(features_status)
-    
-    with gr.Blocks(title="AudioCleaner Pro") as demo:
+    with gr.Blocks(title="AudioKnife") as demo:
+        # Header with embedded CSS
         gr.HTML("""
-            <div class="main-title">
-                <h1>AudioCleaner Pro</h1>
-            </div>
-            <div class="subtitle">
-                AI-Powered Audio Enhancement & Noise Removal
-            </div>
+        <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+        <style>
+            .main-header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 24px;
+                border-radius: 16px;
+                margin-bottom: 20px;
+                text-align: center;
+            }
+            .main-header h1 {
+                margin: 0;
+                font-size: 28px;
+                font-weight: 700;
+            }
+            .main-header p {
+                margin: 8px 0 0 0;
+                opacity: 0.9;
+                font-size: 14px;
+            }
+            .section-title {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 12px;
+                font-weight: 600;
+                color: #333;
+            }
+        </style>
+        <div class="main-header">
+            <h1>AudioKnife</h1>
+            <p>AI-Powered Audio Enhancement & Noise Removal</p>
+        </div>
         """)
         
         with gr.Row():
+            # Left Column - Input & Controls
             with gr.Column(scale=1):
-                # Input section
-                gr.Markdown("### Input")
+                gr.HTML("""
+                <div class="section-title">
+                    <span class="material-icons" style="color: #667eea;">upload_file</span>
+                    <span>Input</span>
+                </div>
+                """)
                 audio_input = gr.Audio(
                     label="Upload Audio File",
                     type="filepath",
                     sources=["upload", "microphone"]
                 )
                 
-                # Mode selection
-                gr.Markdown("### Processing Mode")
+                gr.HTML("""
+                <div class="section-title" style="margin-top: 20px;">
+                    <span class="material-icons" style="color: #667eea;">tune</span>
+                    <span>Processing Mode</span>
+                </div>
+                """)
                 mode_select = gr.Radio(
                     choices=[
                         "Standard (Denoiser + VoiceFixer)",
@@ -342,8 +541,14 @@ def create_interface():
                         "Resemble Enhance (Denoise + Quality)"
                     ],
                     value="Resemble Denoise (SE/Noise removal)",
-                    label="Select Mode",
-                    info="Choose the processing mode based on your audio"
+                    label="",
+                    info=""
+                )
+                
+                # Dynamic mode info display
+                mode_info_display = gr.HTML(
+                    value=get_mode_info_html("Resemble Denoise (SE/Noise removal)"),
+                    label=""
                 )
                 
                 # Process button
@@ -354,41 +559,116 @@ def create_interface():
                 )
                 
                 # Features status
-                with gr.Accordion("Available Features", open=False):
-                    gr.Markdown(f"```\n{features_text}\n```")
+                gr.HTML("""
+                <div class="section-title" style="margin-top: 20px;">
+                    <span class="material-icons" style="color: #667eea;">hub</span>
+                    <span>Available AI Models</span>
+                </div>
+                """)
+                gr.HTML(get_features_status_html())
             
+            # Right Column - Output
             with gr.Column(scale=1):
-                # Output section
-                gr.Markdown("### Output")
+                gr.HTML("""
+                <div class="section-title">
+                    <span class="material-icons" style="color: #667eea;">audio_file</span>
+                    <span>Output</span>
+                </div>
+                """)
                 audio_output = gr.Audio(
                     label="Processed Audio",
                     type="filepath"
                 )
                 
-                # Status
+                gr.HTML("""
+                <div class="section-title" style="margin-top: 20px;">
+                    <span class="material-icons" style="color: #667eea;">terminal</span>
+                    <span>Processing Log</span>
+                </div>
+                """)
                 status_output = gr.Textbox(
-                    label="Processing Status",
-                    lines=10,
-                    max_lines=15,
-                    interactive=False
+                    label="",
+                    lines=12,
+                    max_lines=18,
+                    interactive=False,
+                    placeholder="Processing status will appear here..."
                 )
         
-        # Mode descriptions
-        gr.Markdown("""
-        ### Mode Descriptions
-        
-        | Mode | Description | Best For |
-        |------|-------------|----------|
-        | **Standard** | Denoiser + VoiceFixer | General audio cleanup |
-        | **High Noise** | Aggressive noise reduction | Recordings with significant background noise |
-        | **Severely Degraded** | Maximum restoration | Very poor quality recordings |
-        | **BGM Removal** | Demucs vocal extraction | Music/BGM removal, podcasts |
-        | **Denoiser Only** | Basic noise reduction | Quick cleanup |
-        | **Resemble Denoise** | SE/Noise removal (Fast) | Sound effects, applause, environmental noise |
-        | **Resemble Enhance** | Denoise + Quality boost | High-quality enhancement |
-        """)
+        # Model Reference Section
+        with gr.Accordion("AI Models Reference", open=False):
+            gr.HTML("""
+            <div style="padding: 16px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <thead>
+                        <tr style="background: #f5f5f5;">
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Model</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Source</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Function</th>
+                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Used In Modes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                <strong>Facebook Denoiser</strong>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">Meta AI Research</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                Real-time speech enhancement in waveform domain
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                Standard, High Noise, Severely Degraded, Denoiser Only
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                <strong>VoiceFixer</strong>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">haoheliu (GitHub)</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                Audio restoration and quality enhancement
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                Standard, High Noise, Severely Degraded
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                <strong>Demucs (htdemucs)</strong>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">Meta AI Research</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                Hybrid Transformer for music source separation
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                BGM Removal
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                <strong>Resemble Enhance</strong>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">Resemble AI</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                SE/noise separation + neural audio enhancement
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                                Resemble Denoise, Resemble Enhance
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            """)
         
         # Event handlers
+        # Update mode info when mode is selected
+        mode_select.change(
+            fn=get_mode_info_html,
+            inputs=[mode_select],
+            outputs=[mode_info_display]
+        )
+        
         process_btn.click(
             fn=process_audio,
             inputs=[audio_input, mode_select],
