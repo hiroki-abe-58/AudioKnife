@@ -508,6 +508,168 @@ def run_mossformer2(input_file, output_file, speaker_index=0):
         return None, f"MossFormer2 error: {str(e)}"
 
 
+def get_audio_info(input_file):
+    """
+    Get audio file information using ffprobe
+    
+    Args:
+        input_file: Input audio file path
+    
+    Returns:
+        tuple: (sample_rate, channels) or (None, None) on error
+    """
+    cmd = [
+        "ffprobe", "-v", "quiet", "-print_format", "json",
+        "-show_streams", str(input_file)
+    ]
+    
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            import json
+            data = json.loads(result.stdout)
+            for stream in data.get("streams", []):
+                if stream.get("codec_type") == "audio":
+                    sample_rate = int(stream.get("sample_rate", 44100))
+                    channels = int(stream.get("channels", 2))
+                    return sample_rate, channels
+        return 44100, 2  # default values
+    except Exception:
+        return 44100, 2
+
+
+def add_silence_padding(input_file, output_file, pre_silence=0.0, post_silence=0.0):
+    """
+    Add silence padding before and/or after audio using ffmpeg
+    
+    Args:
+        input_file: Input audio file path
+        output_file: Output audio file path
+        pre_silence: Seconds of silence to add before audio
+        post_silence: Seconds of silence to add after audio
+    
+    Returns:
+        tuple: (output_file_path, status_message)
+    """
+    if pre_silence <= 0 and post_silence <= 0:
+        # No silence to add, just copy
+        shutil.copy(input_file, output_file)
+        return output_file, "No silence added (both values are 0 or less)"
+    
+    # Get audio info
+    sample_rate, channels = get_audio_info(input_file)
+    channel_layout = "stereo" if channels == 2 else "mono"
+    
+    try:
+        if pre_silence > 0 and post_silence > 0:
+            # Add silence both before and after
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-t", str(pre_silence),
+                "-i", f"anullsrc=r={sample_rate}:cl={channel_layout}",
+                "-i", str(input_file),
+                "-f", "lavfi", "-t", str(post_silence),
+                "-i", f"anullsrc=r={sample_rate}:cl={channel_layout}",
+                "-filter_complex", "[0:a][1:a][2:a]concat=n=3:v=0:a=1",
+                str(output_file)
+            ]
+        elif pre_silence > 0:
+            # Add silence only before
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-t", str(pre_silence),
+                "-i", f"anullsrc=r={sample_rate}:cl={channel_layout}",
+                "-i", str(input_file),
+                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1",
+                str(output_file)
+            ]
+        else:
+            # Add silence only after
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(input_file),
+                "-f", "lavfi", "-t", str(post_silence),
+                "-i", f"anullsrc=r={sample_rate}:cl={channel_layout}",
+                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1",
+                str(output_file)
+            ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode == 0 and Path(output_file).exists():
+            return output_file, f"Silence padding added: {pre_silence}s (pre) + {post_silence}s (post)"
+        else:
+            return None, f"ffmpeg failed: {result.stderr[-300:]}"
+    
+    except Exception as e:
+        return None, f"Silence padding error: {str(e)}"
+
+
+def process_silence_padding(audio_file, pre_silence, post_silence, progress=gr.Progress()):
+    """
+    Process audio file to add silence padding
+    
+    Args:
+        audio_file: Input audio file path
+        pre_silence: Seconds of silence to add before audio
+        post_silence: Seconds of silence to add after audio
+        progress: Gradio progress tracker
+    
+    Returns:
+        tuple: (output_file_path, status_message)
+    """
+    if audio_file is None:
+        return None, "Please upload an audio file first."
+    
+    input_path = Path(audio_file)
+    
+    # Validate input
+    try:
+        pre_sec = float(pre_silence) if pre_silence else 0.0
+        post_sec = float(post_silence) if post_silence else 0.0
+    except ValueError:
+        return None, "Invalid silence duration. Please enter numeric values."
+    
+    if pre_sec < 0 or post_sec < 0:
+        return None, "Silence duration cannot be negative."
+    
+    if pre_sec == 0 and post_sec == 0:
+        return None, "Please specify at least one silence duration (pre or post)."
+    
+    # Create output filename
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    output_name = f"{timestamp}__{input_path.stem}_padded.wav"
+    output_path = input_path.parent / output_name
+    
+    status_messages = []
+    status_messages.append(f"Input: {input_path.name}")
+    status_messages.append(f"Pre-silence: {pre_sec}s")
+    status_messages.append(f"Post-silence: {post_sec}s")
+    
+    try:
+        progress(0.2, desc="Getting audio info...")
+        sample_rate, channels = get_audio_info(input_path)
+        status_messages.append(f"Sample rate: {sample_rate} Hz, Channels: {channels}")
+        
+        progress(0.5, desc="Adding silence padding...")
+        result, msg = add_silence_padding(input_path, output_path, pre_sec, post_sec)
+        status_messages.append(msg)
+        
+        progress(0.9, desc="Finalizing...")
+        
+        if result and output_path.exists():
+            progress(1.0, desc="Complete!")
+            status_messages.append(f"\nOutput: {output_path.name}")
+            status_messages.append(f"Size: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
+            return str(output_path), "\n".join(status_messages)
+        else:
+            return None, "\n".join(status_messages) + "\n\nProcessing failed"
+    
+    except Exception as e:
+        import traceback
+        return None, f"Error: {str(e)}\n\n{traceback.format_exc()}"
+
+
 # ===== Main Processing Function =====
 
 def process_audio(audio_file, mode, progress=gr.Progress()):
@@ -747,211 +909,356 @@ def create_interface():
         </div>
         """)
         
-        with gr.Row():
-            # Left Column - Input & Controls
-            with gr.Column(scale=1):
-                gr.HTML("""
-                <div class="section-title">
-                    <span class="material-icons" style="color: #667eea;">upload_file</span>
-                    <span style="color: #333333;">Input</span>
-                </div>
-                """)
-                audio_input = gr.Audio(
-                    label="Upload Audio File",
-                    type="filepath",
-                    sources=["upload", "microphone"]
-                )
+        # Tab structure
+        with gr.Tabs():
+            # ===== Tab 1: Audio Enhancement =====
+            with gr.TabItem("Audio Enhancement"):
+                with gr.Row():
+                    # Left Column - Input & Controls
+                    with gr.Column(scale=1):
+                        gr.HTML("""
+                        <div class="section-title">
+                            <span class="material-icons" style="color: #667eea;">upload_file</span>
+                            <span style="color: #333333;">Input</span>
+                        </div>
+                        """)
+                        audio_input = gr.Audio(
+                            label="Upload Audio File",
+                            type="filepath",
+                            sources=["upload", "microphone"]
+                        )
+                        
+                        gr.HTML("""
+                        <div class="section-title" style="margin-top: 20px;">
+                            <span class="material-icons" style="color: #667eea;">tune</span>
+                            <span style="color: #333333;">Processing Mode</span>
+                        </div>
+                        """)
+                        mode_select = gr.Radio(
+                            choices=[
+                                "Standard (Denoiser + VoiceFixer)",
+                                "High Noise (Aggressive)",
+                                "Severely Degraded",
+                                "BGM Removal (Demucs)",
+                                "Denoiser Only",
+                                "Resemble Denoise (SE/Noise removal)",
+                                "Resemble Enhance (Denoise + Quality)",
+                                "Spleeter (Vocal Extract)",
+                                "Spleeter (4stems)",
+                                "Spleeter (5stems)",
+                                "MP-SENet (High Quality)",
+                                "MossFormer2 (Speaker Separation)"
+                            ],
+                            value="Resemble Denoise (SE/Noise removal)",
+                            label="",
+                            info=""
+                        )
+                        
+                        # Dynamic mode info display
+                        mode_info_display = gr.HTML(
+                            value=get_mode_info_html("Resemble Denoise (SE/Noise removal)"),
+                            label=""
+                        )
+                        
+                        # Process button
+                        process_btn = gr.Button(
+                            "Process Audio",
+                            variant="primary",
+                            size="lg"
+                        )
+                        
+                        # Features status
+                        gr.HTML("""
+                        <div class="section-title" style="margin-top: 20px;">
+                            <span class="material-icons" style="color: #667eea;">hub</span>
+                            <span style="color: #333333;">Available AI Models</span>
+                        </div>
+                        """)
+                        gr.HTML(get_features_status_html())
+                    
+                    # Right Column - Output
+                    with gr.Column(scale=1):
+                        gr.HTML("""
+                        <div class="section-title">
+                            <span class="material-icons" style="color: #667eea;">audio_file</span>
+                            <span style="color: #333333;">Output</span>
+                        </div>
+                        """)
+                        audio_output = gr.Audio(
+                            label="Processed Audio",
+                            type="filepath"
+                        )
+                        
+                        gr.HTML("""
+                        <div class="section-title" style="margin-top: 20px;">
+                            <span class="material-icons" style="color: #667eea;">terminal</span>
+                            <span style="color: #333333;">Processing Log</span>
+                        </div>
+                        """)
+                        status_output = gr.Textbox(
+                            label="",
+                            lines=12,
+                            max_lines=18,
+                            interactive=False,
+                            placeholder="Processing status will appear here..."
+                        )
                 
-                gr.HTML("""
-                <div class="section-title" style="margin-top: 20px;">
-                    <span class="material-icons" style="color: #667eea;">tune</span>
-                    <span style="color: #333333;">Processing Mode</span>
-                </div>
-                """)
-                mode_select = gr.Radio(
-                    choices=[
-                        "Standard (Denoiser + VoiceFixer)",
-                        "High Noise (Aggressive)",
-                        "Severely Degraded",
-                        "BGM Removal (Demucs)",
-                        "Denoiser Only",
-                        "Resemble Denoise (SE/Noise removal)",
-                        "Resemble Enhance (Denoise + Quality)",
-                        "Spleeter (Vocal Extract)",
-                        "Spleeter (4stems)",
-                        "Spleeter (5stems)",
-                        "MP-SENet (High Quality)",
-                        "MossFormer2 (Speaker Separation)"
-                    ],
-                    value="Resemble Denoise (SE/Noise removal)",
-                    label="",
-                    info=""
-                )
-                
-                # Dynamic mode info display
-                mode_info_display = gr.HTML(
-                    value=get_mode_info_html("Resemble Denoise (SE/Noise removal)"),
-                    label=""
-                )
-                
-                # Process button
-                process_btn = gr.Button(
-                    "Process Audio",
-                    variant="primary",
-                    size="lg"
-                )
-                
-                # Features status
-                gr.HTML("""
-                <div class="section-title" style="margin-top: 20px;">
-                    <span class="material-icons" style="color: #667eea;">hub</span>
-                    <span style="color: #333333;">Available AI Models</span>
-                </div>
-                """)
-                gr.HTML(get_features_status_html())
+                # Model Reference Section
+                with gr.Accordion("AI Models Reference", open=False):
+                    gr.HTML("""
+                    <div style="padding: 16px; background: #ffffff; border-radius: 8px;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 14px; background: #ffffff;">
+                            <thead>
+                                <tr style="background: #f5f5f5;">
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Model</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Source</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Function</th>
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Used In Modes</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="background: #ffffff;">
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                        <strong>Facebook Denoiser</strong>
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Meta AI Research</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Real-time speech enhancement in waveform domain
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Standard, High Noise, Severely Degraded, Denoiser Only
+                                    </td>
+                                </tr>
+                                <tr style="background: #fafafa;">
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                        <strong>VoiceFixer</strong>
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">haoheliu (GitHub)</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Audio restoration and quality enhancement
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Standard, High Noise, Severely Degraded
+                                    </td>
+                                </tr>
+                                <tr style="background: #ffffff;">
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                        <strong>Demucs (htdemucs)</strong>
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Meta AI Research</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Hybrid Transformer for music source separation
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        BGM Removal
+                                    </td>
+                                </tr>
+                                <tr style="background: #fafafa;">
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                        <strong>Resemble Enhance</strong>
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Resemble AI</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        SE/noise separation + neural audio enhancement
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Resemble Denoise, Resemble Enhance
+                                    </td>
+                                </tr>
+                                <tr style="background: #ffffff;">
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                        <strong>Spleeter</strong>
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Deezer Research</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Fast music source separation (2/4/5 stems)
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Spleeter (Vocal), Spleeter (4stems), Spleeter (5stems)
+                                    </td>
+                                </tr>
+                                <tr style="background: #fafafa;">
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                        <strong>MP-SENet</strong>
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">INTERSPEECH 2023</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        High-quality speech enhancement (magnitude/phase parallel processing, PESQ 3.50)
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        MP-SENet (High Quality)
+                                    </td>
+                                </tr>
+                                <tr style="background: #ffffff;">
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
+                                        <strong>MossFormer2</strong>
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Alibaba DAMO</td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        Speaker separation (Transformer + RNN-Free recurrent network)
+                                    </td>
+                                    <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
+                                        MossFormer2 (Speaker Separation)
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    """)
             
-            # Right Column - Output
-            with gr.Column(scale=1):
+            # ===== Tab 2: Silence Padding =====
+            with gr.TabItem("Silence Padding"):
                 gr.HTML("""
-                <div class="section-title">
-                    <span class="material-icons" style="color: #667eea;">audio_file</span>
-                    <span style="color: #333333;">Output</span>
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                            color: #ffffff; padding: 16px; border-radius: 12px; margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span class="material-icons" style="font-size: 32px;">volume_off</span>
+                        <div>
+                            <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #ffffff;">Silence Padding Tool</h3>
+                            <p style="margin: 4px 0 0 0; font-size: 14px; color: rgba(255,255,255,0.9);">
+                                Add silent padding (dead air) before and/or after your audio
+                            </p>
+                        </div>
+                    </div>
                 </div>
                 """)
-                audio_output = gr.Audio(
-                    label="Processed Audio",
-                    type="filepath"
-                )
                 
-                gr.HTML("""
-                <div class="section-title" style="margin-top: 20px;">
-                    <span class="material-icons" style="color: #667eea;">terminal</span>
-                    <span style="color: #333333;">Processing Log</span>
-                </div>
-                """)
-                status_output = gr.Textbox(
-                    label="",
-                    lines=12,
-                    max_lines=18,
-                    interactive=False,
-                    placeholder="Processing status will appear here..."
-                )
-        
-        # Model Reference Section
-        with gr.Accordion("AI Models Reference", open=False):
-            gr.HTML("""
-            <div style="padding: 16px; background: #ffffff; border-radius: 8px;">
-                <table style="width: 100%; border-collapse: collapse; font-size: 14px; background: #ffffff;">
-                    <thead>
-                        <tr style="background: #f5f5f5;">
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Model</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Source</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Function</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #667eea; color: #333333; font-weight: 600;">Used In Modes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr style="background: #ffffff;">
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
-                                <strong>Facebook Denoiser</strong>
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Meta AI Research</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Real-time speech enhancement in waveform domain
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Standard, High Noise, Severely Degraded, Denoiser Only
-                            </td>
-                        </tr>
-                        <tr style="background: #fafafa;">
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
-                                <strong>VoiceFixer</strong>
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">haoheliu (GitHub)</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Audio restoration and quality enhancement
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Standard, High Noise, Severely Degraded
-                            </td>
-                        </tr>
-                        <tr style="background: #ffffff;">
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
-                                <strong>Demucs (htdemucs)</strong>
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Meta AI Research</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Hybrid Transformer for music source separation
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                BGM Removal
-                            </td>
-                        </tr>
-                        <tr style="background: #fafafa;">
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
-                                <strong>Resemble Enhance</strong>
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Resemble AI</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                SE/noise separation + neural audio enhancement
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Resemble Denoise, Resemble Enhance
-                            </td>
-                        </tr>
-                        <tr style="background: #ffffff;">
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
-                                <strong>Spleeter</strong>
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Deezer Research</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Fast music source separation (2/4/5 stems)
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Spleeter (Vocal), Spleeter (4stems), Spleeter (5stems)
-                            </td>
-                        </tr>
-                        <tr style="background: #fafafa;">
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
-                                <strong>MP-SENet</strong>
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">INTERSPEECH 2023</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                High-quality speech enhancement (magnitude/phase parallel processing, PESQ 3.50)
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                MP-SENet (High Quality)
-                            </td>
-                        </tr>
-                        <tr style="background: #ffffff;">
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #333333;">
-                                <strong>MossFormer2</strong>
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">Alibaba DAMO</td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                Speaker separation (Transformer + RNN-Free recurrent network)
-                            </td>
-                            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; color: #666666;">
-                                MossFormer2 (Speaker Separation)
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-            """)
+                with gr.Row():
+                    # Left Column - Input & Settings
+                    with gr.Column(scale=1):
+                        gr.HTML("""
+                        <div class="section-title">
+                            <span class="material-icons" style="color: #667eea;">upload_file</span>
+                            <span style="color: #333333;">Input Audio</span>
+                        </div>
+                        """)
+                        padding_audio_input = gr.Audio(
+                            label="Upload Audio File",
+                            type="filepath",
+                            sources=["upload"]
+                        )
+                        
+                        gr.HTML("""
+                        <div class="section-title" style="margin-top: 20px;">
+                            <span class="material-icons" style="color: #667eea;">settings</span>
+                            <span style="color: #333333;">Silence Settings</span>
+                        </div>
+                        """)
+                        
+                        with gr.Group():
+                            gr.HTML("""
+                            <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <span class="material-icons" style="color: #667eea; font-size: 20px;">first_page</span>
+                                    <span style="font-weight: 600; color: #333333;">Pre-Silence (Before Audio)</span>
+                                </div>
+                                <p style="margin: 0; font-size: 13px; color: #666666;">
+                                    Seconds of silence to add at the beginning
+                                </p>
+                            </div>
+                            """)
+                            pre_silence_input = gr.Number(
+                                label="Pre-Silence (seconds)",
+                                value=0.0,
+                                minimum=0.0,
+                                maximum=60.0,
+                                step=0.1,
+                                info="0 - 60 seconds"
+                            )
+                            
+                            gr.HTML("""
+                            <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px; margin-top: 16px;">
+                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                    <span class="material-icons" style="color: #667eea; font-size: 20px;">last_page</span>
+                                    <span style="font-weight: 600; color: #333333;">Post-Silence (After Audio)</span>
+                                </div>
+                                <p style="margin: 0; font-size: 13px; color: #666666;">
+                                    Seconds of silence to add at the end
+                                </p>
+                            </div>
+                            """)
+                            post_silence_input = gr.Number(
+                                label="Post-Silence (seconds)",
+                                value=0.0,
+                                minimum=0.0,
+                                maximum=60.0,
+                                step=0.1,
+                                info="0 - 60 seconds"
+                            )
+                        
+                        # Process button
+                        padding_process_btn = gr.Button(
+                            "Add Silence Padding",
+                            variant="primary",
+                            size="lg"
+                        )
+                        
+                        # Info box
+                        gr.HTML("""
+                        <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; 
+                                    padding: 12px; margin-top: 16px;">
+                            <div style="display: flex; align-items: flex-start; gap: 8px;">
+                                <span class="material-icons" style="color: #1976d2; font-size: 20px;">info</span>
+                                <div>
+                                    <div style="font-weight: 600; color: #1976d2; font-size: 13px;">How it works</div>
+                                    <ul style="margin: 8px 0 0 0; padding-left: 16px; font-size: 13px; color: #333333;">
+                                        <li>Uses ffmpeg to add silent audio segments</li>
+                                        <li>Preserves original sample rate and channels</li>
+                                        <li>Output is saved as WAV format</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        """)
+                    
+                    # Right Column - Output
+                    with gr.Column(scale=1):
+                        gr.HTML("""
+                        <div class="section-title">
+                            <span class="material-icons" style="color: #667eea;">audio_file</span>
+                            <span style="color: #333333;">Output</span>
+                        </div>
+                        """)
+                        padding_audio_output = gr.Audio(
+                            label="Padded Audio",
+                            type="filepath"
+                        )
+                        
+                        gr.HTML("""
+                        <div class="section-title" style="margin-top: 20px;">
+                            <span class="material-icons" style="color: #667eea;">terminal</span>
+                            <span style="color: #333333;">Processing Log</span>
+                        </div>
+                        """)
+                        padding_status_output = gr.Textbox(
+                            label="",
+                            lines=12,
+                            max_lines=18,
+                            interactive=False,
+                            placeholder="Processing status will appear here..."
+                        )
         
         # Event handlers
-        # Update mode info when mode is selected
+        # Update mode info when mode is selected (Tab 1)
         mode_select.change(
             fn=get_mode_info_html,
             inputs=[mode_select],
             outputs=[mode_info_display]
         )
         
+        # Process audio enhancement (Tab 1)
         process_btn.click(
             fn=process_audio,
             inputs=[audio_input, mode_select],
             outputs=[audio_output, status_output],
+            show_progress=True
+        )
+        
+        # Process silence padding (Tab 2)
+        padding_process_btn.click(
+            fn=process_silence_padding,
+            inputs=[padding_audio_input, pre_silence_input, post_silence_input],
+            outputs=[padding_audio_output, padding_status_output],
             show_progress=True
         )
     
