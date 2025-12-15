@@ -1318,9 +1318,9 @@ def create_interface():
                                         label="Pre-Silence (seconds)",
                                         value=0.0,
                                         minimum=0.0,
-                                        maximum=60.0,
+                                        maximum=600.0,
                                         step=0.1,
-                                        info="0 - 60 seconds"
+                                        info="0 - 600 seconds (max 10 min)"
                                     )
                                     
                                     gr.HTML("""
@@ -1338,9 +1338,9 @@ def create_interface():
                                         label="Post-Silence (seconds)",
                                         value=0.0,
                                         minimum=0.0,
-                                        maximum=60.0,
+                                        maximum=600.0,
                                         step=0.1,
-                                        info="0 - 60 seconds"
+                                        info="0 - 600 seconds (max 10 min)"
                                     )
                                 
                                 gr.HTML("""
@@ -1453,9 +1453,9 @@ def create_interface():
                                         label="Pre-Silence (seconds)",
                                         value=0.0,
                                         minimum=0.0,
-                                        maximum=60.0,
+                                        maximum=600.0,
                                         step=0.1,
-                                        info="0 - 60 seconds"
+                                        info="0 - 600 seconds (max 10 min)"
                                     )
                                     
                                     gr.HTML("""
@@ -1473,9 +1473,9 @@ def create_interface():
                                         label="Post-Silence (seconds)",
                                         value=0.0,
                                         minimum=0.0,
-                                        maximum=60.0,
+                                        maximum=600.0,
                                         step=0.1,
-                                        info="0 - 60 seconds"
+                                        info="0 - 600 seconds (max 10 min)"
                                     )
                                 
                                 gr.HTML("""
