@@ -670,6 +670,99 @@ def process_silence_padding(audio_file, pre_silence, post_silence, progress=gr.P
         return None, f"Error: {str(e)}\n\n{traceback.format_exc()}"
 
 
+def process_silence_padding_batch(audio_files, pre_silence, post_silence, progress=gr.Progress()):
+    """
+    Process multiple audio files to add silence padding (batch processing)
+    
+    Args:
+        audio_files: List of input audio file paths
+        pre_silence: Seconds of silence to add before audio
+        post_silence: Seconds of silence to add after audio
+        progress: Gradio progress tracker
+    
+    Returns:
+        tuple: (zip_file_path, status_message)
+    """
+    import zipfile
+    
+    if audio_files is None or len(audio_files) == 0:
+        return None, "Please upload at least one audio file."
+    
+    # Validate input
+    try:
+        pre_sec = float(pre_silence) if pre_silence else 0.0
+        post_sec = float(post_silence) if post_silence else 0.0
+    except ValueError:
+        return None, "Invalid silence duration. Please enter numeric values."
+    
+    if pre_sec < 0 or post_sec < 0:
+        return None, "Silence duration cannot be negative."
+    
+    if pre_sec == 0 and post_sec == 0:
+        return None, "Please specify at least one silence duration (pre or post)."
+    
+    status_messages = []
+    status_messages.append(f"Batch Processing: {len(audio_files)} files")
+    status_messages.append(f"Pre-silence: {pre_sec}s")
+    status_messages.append(f"Post-silence: {post_sec}s")
+    status_messages.append("-" * 40)
+    
+    # Create temp directory for output files
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    temp_output_dir = Path(tempfile.mkdtemp(prefix="silence_padding_"))
+    processed_files = []
+    success_count = 0
+    fail_count = 0
+    
+    try:
+        for i, audio_file in enumerate(audio_files):
+            input_path = Path(audio_file)
+            progress((i + 0.5) / len(audio_files), desc=f"Processing {input_path.name}...")
+            
+            # Create output filename
+            output_name = f"{input_path.stem}_padded.wav"
+            output_path = temp_output_dir / output_name
+            
+            # Process the file
+            result, msg = add_silence_padding(input_path, output_path, pre_sec, post_sec)
+            
+            if result and output_path.exists():
+                processed_files.append(output_path)
+                success_count += 1
+                status_messages.append(f"[OK] {input_path.name}")
+            else:
+                fail_count += 1
+                status_messages.append(f"[FAIL] {input_path.name}: {msg}")
+        
+        progress(0.9, desc="Creating ZIP archive...")
+        
+        if len(processed_files) == 0:
+            return None, "\n".join(status_messages) + "\n\nNo files were processed successfully."
+        
+        # Create ZIP file
+        zip_filename = f"{timestamp}__padded_audio_batch.zip"
+        zip_path = temp_output_dir / zip_filename
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in processed_files:
+                zipf.write(file_path, file_path.name)
+        
+        progress(1.0, desc="Complete!")
+        
+        status_messages.append("-" * 40)
+        status_messages.append(f"Success: {success_count} / {len(audio_files)} files")
+        if fail_count > 0:
+            status_messages.append(f"Failed: {fail_count} files")
+        status_messages.append(f"\nOutput: {zip_filename}")
+        status_messages.append(f"Size: {zip_path.stat().st_size / 1024 / 1024:.2f} MB")
+        
+        return str(zip_path), "\n".join(status_messages)
+    
+    except Exception as e:
+        import traceback
+        return None, f"Error: {str(e)}\n\n{traceback.format_exc()}"
+
+
 # ===== Main Processing Function =====
 
 def process_audio(audio_file, mode, progress=gr.Progress()):
@@ -1123,120 +1216,240 @@ def create_interface():
                 </div>
                 """)
                 
-                with gr.Row():
-                    # Left Column - Input & Settings
-                    with gr.Column(scale=1):
-                        gr.HTML("""
-                        <div class="section-title">
-                            <span class="material-icons" style="color: #667eea;">upload_file</span>
-                            <span style="color: #333333;">Input Audio</span>
-                        </div>
-                        """)
-                        padding_audio_input = gr.Audio(
-                            label="Upload Audio File",
-                            type="filepath",
-                            sources=["upload"]
-                        )
-                        
-                        gr.HTML("""
-                        <div class="section-title" style="margin-top: 20px;">
-                            <span class="material-icons" style="color: #667eea;">settings</span>
-                            <span style="color: #333333;">Silence Settings</span>
-                        </div>
-                        """)
-                        
-                        with gr.Group():
-                            gr.HTML("""
-                            <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
-                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                    <span class="material-icons" style="color: #667eea; font-size: 20px;">first_page</span>
-                                    <span style="font-weight: 600; color: #333333;">Pre-Silence (Before Audio)</span>
+                # Sub-tabs for Single and Batch processing
+                with gr.Tabs():
+                    # ===== Sub-tab: Single File =====
+                    with gr.TabItem("Single File"):
+                        with gr.Row():
+                            # Left Column - Input & Settings
+                            with gr.Column(scale=1):
+                                gr.HTML("""
+                                <div class="section-title">
+                                    <span class="material-icons" style="color: #667eea;">upload_file</span>
+                                    <span style="color: #333333;">Input Audio</span>
                                 </div>
-                                <p style="margin: 0; font-size: 13px; color: #666666;">
-                                    Seconds of silence to add at the beginning
-                                </p>
-                            </div>
-                            """)
-                            pre_silence_input = gr.Number(
-                                label="Pre-Silence (seconds)",
-                                value=0.0,
-                                minimum=0.0,
-                                maximum=60.0,
-                                step=0.1,
-                                info="0 - 60 seconds"
-                            )
+                                """)
+                                padding_audio_input = gr.Audio(
+                                    label="Upload Audio File",
+                                    type="filepath",
+                                    sources=["upload"]
+                                )
+                                
+                                gr.HTML("""
+                                <div class="section-title" style="margin-top: 20px;">
+                                    <span class="material-icons" style="color: #667eea;">settings</span>
+                                    <span style="color: #333333;">Silence Settings</span>
+                                </div>
+                                """)
+                                
+                                with gr.Group():
+                                    gr.HTML("""
+                                    <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <span class="material-icons" style="color: #667eea; font-size: 20px;">first_page</span>
+                                            <span style="font-weight: 600; color: #333333;">Pre-Silence (Before Audio)</span>
+                                        </div>
+                                        <p style="margin: 0; font-size: 13px; color: #666666;">
+                                            Seconds of silence to add at the beginning
+                                        </p>
+                                    </div>
+                                    """)
+                                    pre_silence_input = gr.Number(
+                                        label="Pre-Silence (seconds)",
+                                        value=0.0,
+                                        minimum=0.0,
+                                        maximum=60.0,
+                                        step=0.1,
+                                        info="0 - 60 seconds"
+                                    )
+                                    
+                                    gr.HTML("""
+                                    <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px; margin-top: 16px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <span class="material-icons" style="color: #667eea; font-size: 20px;">last_page</span>
+                                            <span style="font-weight: 600; color: #333333;">Post-Silence (After Audio)</span>
+                                        </div>
+                                        <p style="margin: 0; font-size: 13px; color: #666666;">
+                                            Seconds of silence to add at the end
+                                        </p>
+                                    </div>
+                                    """)
+                                    post_silence_input = gr.Number(
+                                        label="Post-Silence (seconds)",
+                                        value=0.0,
+                                        minimum=0.0,
+                                        maximum=60.0,
+                                        step=0.1,
+                                        info="0 - 60 seconds"
+                                    )
+                                
+                                # Process button
+                                padding_process_btn = gr.Button(
+                                    "Add Silence Padding",
+                                    variant="primary",
+                                    size="lg"
+                                )
+                                
+                                # Info box
+                                gr.HTML("""
+                                <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; 
+                                            padding: 12px; margin-top: 16px;">
+                                    <div style="display: flex; align-items: flex-start; gap: 8px;">
+                                        <span class="material-icons" style="color: #1976d2; font-size: 20px;">info</span>
+                                        <div>
+                                            <div style="font-weight: 600; color: #1976d2; font-size: 13px;">How it works</div>
+                                            <ul style="margin: 8px 0 0 0; padding-left: 16px; font-size: 13px; color: #333333;">
+                                                <li>Uses ffmpeg to add silent audio segments</li>
+                                                <li>Preserves original sample rate and channels</li>
+                                                <li>Output is saved as WAV format</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                                """)
                             
-                            gr.HTML("""
-                            <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px; margin-top: 16px;">
-                                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                                    <span class="material-icons" style="color: #667eea; font-size: 20px;">last_page</span>
-                                    <span style="font-weight: 600; color: #333333;">Post-Silence (After Audio)</span>
+                            # Right Column - Output
+                            with gr.Column(scale=1):
+                                gr.HTML("""
+                                <div class="section-title">
+                                    <span class="material-icons" style="color: #667eea;">audio_file</span>
+                                    <span style="color: #333333;">Output</span>
                                 </div>
-                                <p style="margin: 0; font-size: 13px; color: #666666;">
-                                    Seconds of silence to add at the end
-                                </p>
-                            </div>
-                            """)
-                            post_silence_input = gr.Number(
-                                label="Post-Silence (seconds)",
-                                value=0.0,
-                                minimum=0.0,
-                                maximum=60.0,
-                                step=0.1,
-                                info="0 - 60 seconds"
-                            )
-                        
-                        # Process button
-                        padding_process_btn = gr.Button(
-                            "Add Silence Padding",
-                            variant="primary",
-                            size="lg"
-                        )
-                        
-                        # Info box
-                        gr.HTML("""
-                        <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; 
-                                    padding: 12px; margin-top: 16px;">
-                            <div style="display: flex; align-items: flex-start; gap: 8px;">
-                                <span class="material-icons" style="color: #1976d2; font-size: 20px;">info</span>
-                                <div>
-                                    <div style="font-weight: 600; color: #1976d2; font-size: 13px;">How it works</div>
-                                    <ul style="margin: 8px 0 0 0; padding-left: 16px; font-size: 13px; color: #333333;">
-                                        <li>Uses ffmpeg to add silent audio segments</li>
-                                        <li>Preserves original sample rate and channels</li>
-                                        <li>Output is saved as WAV format</li>
-                                    </ul>
+                                """)
+                                padding_audio_output = gr.Audio(
+                                    label="Padded Audio",
+                                    type="filepath"
+                                )
+                                
+                                gr.HTML("""
+                                <div class="section-title" style="margin-top: 20px;">
+                                    <span class="material-icons" style="color: #667eea;">terminal</span>
+                                    <span style="color: #333333;">Processing Log</span>
                                 </div>
-                            </div>
-                        </div>
-                        """)
+                                """)
+                                padding_status_output = gr.Textbox(
+                                    label="",
+                                    lines=12,
+                                    max_lines=18,
+                                    interactive=False,
+                                    placeholder="Processing status will appear here..."
+                                )
                     
-                    # Right Column - Output
-                    with gr.Column(scale=1):
-                        gr.HTML("""
-                        <div class="section-title">
-                            <span class="material-icons" style="color: #667eea;">audio_file</span>
-                            <span style="color: #333333;">Output</span>
-                        </div>
-                        """)
-                        padding_audio_output = gr.Audio(
-                            label="Padded Audio",
-                            type="filepath"
-                        )
-                        
-                        gr.HTML("""
-                        <div class="section-title" style="margin-top: 20px;">
-                            <span class="material-icons" style="color: #667eea;">terminal</span>
-                            <span style="color: #333333;">Processing Log</span>
-                        </div>
-                        """)
-                        padding_status_output = gr.Textbox(
-                            label="",
-                            lines=12,
-                            max_lines=18,
-                            interactive=False,
-                            placeholder="Processing status will appear here..."
-                        )
+                    # ===== Sub-tab: Batch Processing =====
+                    with gr.TabItem("Batch Processing"):
+                        with gr.Row():
+                            # Left Column - Input & Settings
+                            with gr.Column(scale=1):
+                                gr.HTML("""
+                                <div class="section-title">
+                                    <span class="material-icons" style="color: #667eea;">folder_open</span>
+                                    <span style="color: #333333;">Input Audio Files (Multiple)</span>
+                                </div>
+                                """)
+                                batch_audio_input = gr.Files(
+                                    label="Upload Multiple Audio Files",
+                                    file_types=["audio"],
+                                    file_count="multiple"
+                                )
+                                
+                                gr.HTML("""
+                                <div class="section-title" style="margin-top: 20px;">
+                                    <span class="material-icons" style="color: #667eea;">settings</span>
+                                    <span style="color: #333333;">Silence Settings (Applied to All Files)</span>
+                                </div>
+                                """)
+                                
+                                with gr.Group():
+                                    gr.HTML("""
+                                    <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <span class="material-icons" style="color: #667eea; font-size: 20px;">first_page</span>
+                                            <span style="font-weight: 600; color: #333333;">Pre-Silence (Before Audio)</span>
+                                        </div>
+                                        <p style="margin: 0; font-size: 13px; color: #666666;">
+                                            Seconds of silence to add at the beginning
+                                        </p>
+                                    </div>
+                                    """)
+                                    batch_pre_silence_input = gr.Number(
+                                        label="Pre-Silence (seconds)",
+                                        value=0.0,
+                                        minimum=0.0,
+                                        maximum=60.0,
+                                        step=0.1,
+                                        info="0 - 60 seconds"
+                                    )
+                                    
+                                    gr.HTML("""
+                                    <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px; margin-top: 16px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                            <span class="material-icons" style="color: #667eea; font-size: 20px;">last_page</span>
+                                            <span style="font-weight: 600; color: #333333;">Post-Silence (After Audio)</span>
+                                        </div>
+                                        <p style="margin: 0; font-size: 13px; color: #666666;">
+                                            Seconds of silence to add at the end
+                                        </p>
+                                    </div>
+                                    """)
+                                    batch_post_silence_input = gr.Number(
+                                        label="Post-Silence (seconds)",
+                                        value=0.0,
+                                        minimum=0.0,
+                                        maximum=60.0,
+                                        step=0.1,
+                                        info="0 - 60 seconds"
+                                    )
+                                
+                                # Process button
+                                batch_padding_process_btn = gr.Button(
+                                    "Process All Files",
+                                    variant="primary",
+                                    size="lg"
+                                )
+                                
+                                # Info box
+                                gr.HTML("""
+                                <div style="background: #fff3e0; border: 1px solid #ff9800; border-radius: 8px; 
+                                            padding: 12px; margin-top: 16px;">
+                                    <div style="display: flex; align-items: flex-start; gap: 8px;">
+                                        <span class="material-icons" style="color: #f57c00; font-size: 20px;">folder_zip</span>
+                                        <div>
+                                            <div style="font-weight: 600; color: #f57c00; font-size: 13px;">Batch Processing</div>
+                                            <ul style="margin: 8px 0 0 0; padding-left: 16px; font-size: 13px; color: #333333;">
+                                                <li>Upload multiple audio files at once</li>
+                                                <li>Same silence settings applied to all files</li>
+                                                <li>Output is a ZIP archive containing all processed files</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                                """)
+                            
+                            # Right Column - Output
+                            with gr.Column(scale=1):
+                                gr.HTML("""
+                                <div class="section-title">
+                                    <span class="material-icons" style="color: #667eea;">folder_zip</span>
+                                    <span style="color: #333333;">Output (ZIP Archive)</span>
+                                </div>
+                                """)
+                                batch_output_file = gr.File(
+                                    label="Download Processed Files (ZIP)"
+                                )
+                                
+                                gr.HTML("""
+                                <div class="section-title" style="margin-top: 20px;">
+                                    <span class="material-icons" style="color: #667eea;">terminal</span>
+                                    <span style="color: #333333;">Processing Log</span>
+                                </div>
+                                """)
+                                batch_status_output = gr.Textbox(
+                                    label="",
+                                    lines=12,
+                                    max_lines=18,
+                                    interactive=False,
+                                    placeholder="Batch processing status will appear here..."
+                                )
         
         # Event handlers
         # Update mode info when mode is selected (Tab 1)
@@ -1254,11 +1467,19 @@ def create_interface():
             show_progress=True
         )
         
-        # Process silence padding (Tab 2)
+        # Process silence padding (Tab 2 - Single File)
         padding_process_btn.click(
             fn=process_silence_padding,
             inputs=[padding_audio_input, pre_silence_input, post_silence_input],
             outputs=[padding_audio_output, padding_status_output],
+            show_progress=True
+        )
+        
+        # Process silence padding batch (Tab 2 - Batch Processing)
+        batch_padding_process_btn.click(
+            fn=process_silence_padding_batch,
+            inputs=[batch_audio_input, batch_pre_silence_input, batch_post_silence_input],
+            outputs=[batch_output_file, batch_status_output],
             show_progress=True
         )
     
