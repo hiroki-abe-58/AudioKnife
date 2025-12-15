@@ -538,29 +538,67 @@ def get_audio_info(input_file):
         return 44100, 2
 
 
-def add_silence_padding(input_file, output_file, pre_silence=0.0, post_silence=0.0):
+# Output format configurations
+OUTPUT_FORMATS = {
+    "WAV": {"ext": ".wav", "codec": ["pcm_s16le"], "description": "Lossless, large file size"},
+    "MP3 (320kbps)": {"ext": ".mp3", "codec": ["-c:a", "libmp3lame", "-b:a", "320k"], "description": "High quality compressed"},
+    "MP3 (192kbps)": {"ext": ".mp3", "codec": ["-c:a", "libmp3lame", "-b:a", "192k"], "description": "Standard quality"},
+    "MP3 (128kbps)": {"ext": ".mp3", "codec": ["-c:a", "libmp3lame", "-b:a", "128k"], "description": "Smaller file size"},
+    "AAC (256kbps)": {"ext": ".m4a", "codec": ["-c:a", "aac", "-b:a", "256k"], "description": "Apple/iOS compatible"},
+    "AAC (192kbps)": {"ext": ".m4a", "codec": ["-c:a", "aac", "-b:a", "192k"], "description": "Standard AAC"},
+    "FLAC": {"ext": ".flac", "codec": ["-c:a", "flac"], "description": "Lossless, compressed"},
+    "OGG (192kbps)": {"ext": ".ogg", "codec": ["-c:a", "libvorbis", "-b:a", "192k"], "description": "Open format"},
+}
+
+
+def get_output_format_choices():
+    """Get list of output format choices for dropdown"""
+    return list(OUTPUT_FORMATS.keys())
+
+
+def add_silence_padding(input_file, output_file, pre_silence=0.0, post_silence=0.0, output_format="WAV"):
     """
     Add silence padding before and/or after audio using ffmpeg
     
     Args:
         input_file: Input audio file path
-        output_file: Output audio file path
+        output_file: Output audio file path (extension will be changed based on format)
         pre_silence: Seconds of silence to add before audio
         post_silence: Seconds of silence to add after audio
+        output_format: Output format key from OUTPUT_FORMATS
     
     Returns:
         tuple: (output_file_path, status_message)
     """
+    # Get format settings
+    format_config = OUTPUT_FORMATS.get(output_format, OUTPUT_FORMATS["WAV"])
+    
+    # Adjust output file extension based on format
+    output_path = Path(output_file)
+    output_file = output_path.parent / (output_path.stem + format_config["ext"])
+    
     if pre_silence <= 0 and post_silence <= 0:
-        # No silence to add, just copy
-        shutil.copy(input_file, output_file)
-        return output_file, "No silence added (both values are 0 or less)"
+        # No silence to add, just convert format
+        cmd = ["ffmpeg", "-y", "-i", str(input_file)]
+        if format_config["codec"][0] != "pcm_s16le":
+            cmd.extend(format_config["codec"])
+        cmd.append(str(output_file))
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0 and Path(output_file).exists():
+                return output_file, f"Format converted to {output_format}"
+            else:
+                return None, f"ffmpeg failed: {result.stderr[-300:]}"
+        except Exception as e:
+            return None, f"Format conversion error: {str(e)}"
     
     # Get audio info
     sample_rate, channels = get_audio_info(input_file)
     channel_layout = "stereo" if channels == 2 else "mono"
     
     try:
+        # Build base command
         if pre_silence > 0 and post_silence > 0:
             # Add silence both before and after
             cmd = [
@@ -570,8 +608,7 @@ def add_silence_padding(input_file, output_file, pre_silence=0.0, post_silence=0
                 "-i", str(input_file),
                 "-f", "lavfi", "-t", str(post_silence),
                 "-i", f"anullsrc=r={sample_rate}:cl={channel_layout}",
-                "-filter_complex", "[0:a][1:a][2:a]concat=n=3:v=0:a=1",
-                str(output_file)
+                "-filter_complex", "[0:a][1:a][2:a]concat=n=3:v=0:a=1"
             ]
         elif pre_silence > 0:
             # Add silence only before
@@ -580,8 +617,7 @@ def add_silence_padding(input_file, output_file, pre_silence=0.0, post_silence=0
                 "-f", "lavfi", "-t", str(pre_silence),
                 "-i", f"anullsrc=r={sample_rate}:cl={channel_layout}",
                 "-i", str(input_file),
-                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1",
-                str(output_file)
+                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1"
             ]
         else:
             # Add silence only after
@@ -590,14 +626,20 @@ def add_silence_padding(input_file, output_file, pre_silence=0.0, post_silence=0
                 "-i", str(input_file),
                 "-f", "lavfi", "-t", str(post_silence),
                 "-i", f"anullsrc=r={sample_rate}:cl={channel_layout}",
-                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1",
-                str(output_file)
+                "-filter_complex", "[0:a][1:a]concat=n=2:v=0:a=1"
             ]
+        
+        # Add codec settings for non-WAV formats
+        if format_config["codec"][0] != "pcm_s16le":
+            cmd.extend(format_config["codec"])
+        
+        # Add output file
+        cmd.append(str(output_file))
         
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode == 0 and Path(output_file).exists():
-            return output_file, f"Silence padding added: {pre_silence}s (pre) + {post_silence}s (post)"
+            return output_file, f"Silence padding added: {pre_silence}s (pre) + {post_silence}s (post) [{output_format}]"
         else:
             return None, f"ffmpeg failed: {result.stderr[-300:]}"
     
@@ -605,7 +647,7 @@ def add_silence_padding(input_file, output_file, pre_silence=0.0, post_silence=0
         return None, f"Silence padding error: {str(e)}"
 
 
-def process_silence_padding(audio_file, pre_silence, post_silence, progress=gr.Progress()):
+def process_silence_padding(audio_file, pre_silence, post_silence, output_format, progress=gr.Progress()):
     """
     Process audio file to add silence padding
     
@@ -613,6 +655,7 @@ def process_silence_padding(audio_file, pre_silence, post_silence, progress=gr.P
         audio_file: Input audio file path
         pre_silence: Seconds of silence to add before audio
         post_silence: Seconds of silence to add after audio
+        output_format: Output format (WAV, MP3, AAC, etc.)
         progress: Gradio progress tracker
     
     Returns:
@@ -636,15 +679,20 @@ def process_silence_padding(audio_file, pre_silence, post_silence, progress=gr.P
     if pre_sec == 0 and post_sec == 0:
         return None, "Please specify at least one silence duration (pre or post)."
     
+    # Get output extension based on format
+    format_config = OUTPUT_FORMATS.get(output_format, OUTPUT_FORMATS["WAV"])
+    output_ext = format_config["ext"]
+    
     # Create output filename
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    output_name = f"{timestamp}__{input_path.stem}_padded.wav"
+    output_name = f"{timestamp}__{input_path.stem}_padded{output_ext}"
     output_path = input_path.parent / output_name
     
     status_messages = []
     status_messages.append(f"Input: {input_path.name}")
     status_messages.append(f"Pre-silence: {pre_sec}s")
     status_messages.append(f"Post-silence: {post_sec}s")
+    status_messages.append(f"Output format: {output_format}")
     
     try:
         progress(0.2, desc="Getting audio info...")
@@ -652,16 +700,19 @@ def process_silence_padding(audio_file, pre_silence, post_silence, progress=gr.P
         status_messages.append(f"Sample rate: {sample_rate} Hz, Channels: {channels}")
         
         progress(0.5, desc="Adding silence padding...")
-        result, msg = add_silence_padding(input_path, output_path, pre_sec, post_sec)
+        result, msg = add_silence_padding(input_path, output_path, pre_sec, post_sec, output_format)
         status_messages.append(msg)
         
         progress(0.9, desc="Finalizing...")
         
-        if result and output_path.exists():
+        # Result path may have different extension
+        result_path = Path(result) if result else None
+        
+        if result_path and result_path.exists():
             progress(1.0, desc="Complete!")
-            status_messages.append(f"\nOutput: {output_path.name}")
-            status_messages.append(f"Size: {output_path.stat().st_size / 1024 / 1024:.2f} MB")
-            return str(output_path), "\n".join(status_messages)
+            status_messages.append(f"\nOutput: {result_path.name}")
+            status_messages.append(f"Size: {result_path.stat().st_size / 1024 / 1024:.2f} MB")
+            return str(result_path), "\n".join(status_messages)
         else:
             return None, "\n".join(status_messages) + "\n\nProcessing failed"
     
@@ -670,7 +721,7 @@ def process_silence_padding(audio_file, pre_silence, post_silence, progress=gr.P
         return None, f"Error: {str(e)}\n\n{traceback.format_exc()}"
 
 
-def process_silence_padding_batch(audio_files, pre_silence, post_silence, progress=gr.Progress()):
+def process_silence_padding_batch(audio_files, pre_silence, post_silence, output_format, progress=gr.Progress()):
     """
     Process multiple audio files to add silence padding (batch processing)
     
@@ -678,6 +729,7 @@ def process_silence_padding_batch(audio_files, pre_silence, post_silence, progre
         audio_files: List of input audio file paths
         pre_silence: Seconds of silence to add before audio
         post_silence: Seconds of silence to add after audio
+        output_format: Output format (WAV, MP3, AAC, etc.)
         progress: Gradio progress tracker
     
     Returns:
@@ -701,10 +753,15 @@ def process_silence_padding_batch(audio_files, pre_silence, post_silence, progre
     if pre_sec == 0 and post_sec == 0:
         return None, "Please specify at least one silence duration (pre or post)."
     
+    # Get output extension based on format
+    format_config = OUTPUT_FORMATS.get(output_format, OUTPUT_FORMATS["WAV"])
+    output_ext = format_config["ext"]
+    
     status_messages = []
     status_messages.append(f"Batch Processing: {len(audio_files)} files")
     status_messages.append(f"Pre-silence: {pre_sec}s")
     status_messages.append(f"Post-silence: {post_sec}s")
+    status_messages.append(f"Output format: {output_format}")
     status_messages.append("-" * 40)
     
     # Create temp directory for output files
@@ -719,15 +776,18 @@ def process_silence_padding_batch(audio_files, pre_silence, post_silence, progre
             input_path = Path(audio_file)
             progress((i + 0.5) / len(audio_files), desc=f"Processing {input_path.name}...")
             
-            # Create output filename
-            output_name = f"{input_path.stem}_padded.wav"
+            # Create output filename (extension will be set by add_silence_padding)
+            output_name = f"{input_path.stem}_padded{output_ext}"
             output_path = temp_output_dir / output_name
             
             # Process the file
-            result, msg = add_silence_padding(input_path, output_path, pre_sec, post_sec)
+            result, msg = add_silence_padding(input_path, output_path, pre_sec, post_sec, output_format)
             
-            if result and output_path.exists():
-                processed_files.append(output_path)
+            # Result may have different path due to extension change
+            result_path = Path(result) if result else None
+            
+            if result_path and result_path.exists():
+                processed_files.append(result_path)
                 success_count += 1
                 status_messages.append(f"[OK] {input_path.name}")
             else:
@@ -1283,16 +1343,34 @@ def create_interface():
                                         info="0 - 60 seconds"
                                     )
                                 
+                                gr.HTML("""
+                                <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px; margin-top: 16px;">
+                                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                        <span class="material-icons" style="color: #667eea; font-size: 20px;">audio_file</span>
+                                        <span style="font-weight: 600; color: #333333;">Output Format</span>
+                                    </div>
+                                    <p style="margin: 0; font-size: 13px; color: #666666;">
+                                        Select the output audio format
+                                    </p>
+                                </div>
+                                """)
+                                output_format_select = gr.Dropdown(
+                                    choices=get_output_format_choices(),
+                                    value="WAV",
+                                    label="Output Format",
+                                    info="WAV=Lossless, MP3/AAC=Compressed"
+                                )
+
                                 # Process button
                                 padding_process_btn = gr.Button(
                                     "Add Silence Padding",
                                     variant="primary",
                                     size="lg"
                                 )
-                                
+
                                 # Info box
                                 gr.HTML("""
-                                <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; 
+                                <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px;
                                             padding: 12px; margin-top: 16px;">
                                     <div style="display: flex; align-items: flex-start; gap: 8px;">
                                         <span class="material-icons" style="color: #1976d2; font-size: 20px;">info</span>
@@ -1400,16 +1478,34 @@ def create_interface():
                                         info="0 - 60 seconds"
                                     )
                                 
+                                gr.HTML("""
+                                <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin-bottom: 12px; margin-top: 16px;">
+                                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                        <span class="material-icons" style="color: #667eea; font-size: 20px;">audio_file</span>
+                                        <span style="font-weight: 600; color: #333333;">Output Format</span>
+                                    </div>
+                                    <p style="margin: 0; font-size: 13px; color: #666666;">
+                                        Select the output audio format for all files
+                                    </p>
+                                </div>
+                                """)
+                                batch_output_format_select = gr.Dropdown(
+                                    choices=get_output_format_choices(),
+                                    value="WAV",
+                                    label="Output Format",
+                                    info="WAV=Lossless, MP3/AAC=Compressed"
+                                )
+
                                 # Process button
                                 batch_padding_process_btn = gr.Button(
                                     "Process All Files",
                                     variant="primary",
                                     size="lg"
                                 )
-                                
+
                                 # Info box
                                 gr.HTML("""
-                                <div style="background: #fff3e0; border: 1px solid #ff9800; border-radius: 8px; 
+                                <div style="background: #fff3e0; border: 1px solid #ff9800; border-radius: 8px;
                                             padding: 12px; margin-top: 16px;">
                                     <div style="display: flex; align-items: flex-start; gap: 8px;">
                                         <span class="material-icons" style="color: #f57c00; font-size: 20px;">folder_zip</span>
@@ -1470,15 +1566,15 @@ def create_interface():
         # Process silence padding (Tab 2 - Single File)
         padding_process_btn.click(
             fn=process_silence_padding,
-            inputs=[padding_audio_input, pre_silence_input, post_silence_input],
+            inputs=[padding_audio_input, pre_silence_input, post_silence_input, output_format_select],
             outputs=[padding_audio_output, padding_status_output],
             show_progress=True
         )
-        
+
         # Process silence padding batch (Tab 2 - Batch Processing)
         batch_padding_process_btn.click(
             fn=process_silence_padding_batch,
-            inputs=[batch_audio_input, batch_pre_silence_input, batch_post_silence_input],
+            inputs=[batch_audio_input, batch_pre_silence_input, batch_post_silence_input, batch_output_format_select],
             outputs=[batch_output_file, batch_status_output],
             show_progress=True
         )
