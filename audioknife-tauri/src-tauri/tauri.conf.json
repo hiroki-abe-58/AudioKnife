@@ -1,0 +1,54 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "productName": "AudioKnife",
+    "version": "0.1.0",
+    "identifier": "com.audioknife.desktop",
+    "build": {
+        "beforeDevCommand": "npm run dev",
+        "devUrl": "http://localhost:1420",
+        "beforeBuildCommand": "npm run build",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "windows": [
+            {
+                "title": "AudioKnife - Apple Silicon Optimized Audio Processor",
+                "width": 1200,
+                "height": 800,
+                "minWidth": 800,
+                "minHeight": 600,
+                "resizable": true,
+                "fullscreen": false,
+                "decorations": true,
+                "transparent": false
+            }
+        ],
+        "security": {
+            "csp": null
+        },
+        "macOSPrivateApi": false
+    },
+    "bundle": {
+        "active": true,
+        "targets": [
+            "dmg",
+            "app"
+        ],
+        "icon": [
+            "icons/32x32.png",
+            "icons/128x128.png",
+            "icons/128x128@2x.png",
+            "icons/icon.icns",
+            "icons/icon.ico"
+        ],
+        "category": "Music",
+        "shortDescription": "Apple Silicon Optimized Audio Processor",
+        "longDescription": "AudioKnife is a high-performance audio processing application optimized for Apple Silicon. It features native Rust audio processing for silence padding and format conversion, with AI enhancement capabilities via Python backend.",
+        "macOS": {
+            "minimumSystemVersion": "11.0",
+            "signingIdentity": null,
+            "providerShortName": null,
+            "entitlements": null
+        }
+    }
+}
